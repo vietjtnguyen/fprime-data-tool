@@ -4,7 +4,77 @@ import io
 import struct
 
 
-native_types = (
+# Global collection of all F Prime types keyed by their name.  We start with
+# framework level types such as fundamental numeric types and ComPacket.  If a
+# dictionary is loaded the types defined there in will be added to this
+# collection.
+fptypes = {}
+
+# Class decorator factory for extending an enum.IntEnum based class with an
+# decode class function and encode method based on the provided underlying
+# type.
+def enum_represented_as(enum_underlying_type):
+    def decorator(type):
+        def decode(cls, istream):
+            untyped = enum_underlying_type.decode(istream)
+            return cls(untyped.value)
+        type.decode = classmethod(decode)
+
+        def encode(self, ostream):
+            untyped = enum_underlying_type(self.value)
+            untyped.encode(ostream)
+        type.encode = encode
+
+        return type
+
+    return decorator
+
+
+#### Fundamental types ---------------------------------------------------------
+
+
+# Creates a class representing the fundamental type given the name and struct
+# format.
+def make_fundamental_type(name, struct_format):
+    fundamental_struct = struct.Struct(struct_format)
+
+    class FundamentalType():
+
+        def __init__(self, value = 0):
+            self.value = value
+
+        @classmethod
+        def decode(cls, istream):
+            data = istream.read(fundamental_struct.size)
+            return cls(fundamental_struct.unpack(data)[0])
+
+        def encode(self, ostream):
+            return ostream.write(fundamental_struct.pack(self.value))
+
+        def __float__(self):
+            return float(self.value)
+
+        def __format__(self, spec):
+            return format(self.value, spec)
+
+        def __int__(self):
+            return int(self.value)
+
+        def __repr__(self):
+            return repr(self.value)
+
+        def __str__(self):
+            return str(self.value)
+
+    FundamentalType.__name__ = name
+
+    return FundamentalType
+
+
+# Specification for fundamental_types.  Instead of manually writing out the
+# types we construct them from this specification which is a tuple of name and
+# struct format.
+fundamental_type_specs = (
     ('I8', '>b'),
     ('U8', '>B'),
     ('I16', '>h'),
@@ -16,53 +86,130 @@ native_types = (
     ('F32', '>f'),
     ('F64', '>d'),
 )
+fptypes_fundamental = {}
+for name, struct_format in fundamental_type_specs:
+    # Create the fundamental type and register it in fptypes.
+    fptypes[name] = make_fundamental_type(name, struct_format)
+    # Also collect the fundamental_types into their own collection.
+    fptypes_fundamental[name] = fptypes[name]
+    # Also put the fundamental_types into the global namespace for convenience.
+    globals()[name] = fptypes[name]
 
 
-def make_native_type(struct_format):
-    struct_format = struct.Struct(struct_format)
-
-    def f(istream):
-        return struct_format.unpack(istream.read(struct_format.size))[0]
-
-    return f
+#### F Prime configuration -----------------------------------------------------
 
 
-for name, struct_format in native_types:
-    globals()[name] = make_native_type(struct_format)
-    globals()[name].__name__ = name
-
-
-native_types_by_name = {name: globals()[name] for name, _ in native_types}
-
-
+# These are F Prime configuration flags (preprocessor definitions) that affect
+# the format of data to be encoded/decoded.
 fprime_configurable_flags = (
+    # This controls whether the Time type includes the time base.
     ('FW_USE_TIME_BASE', True),
+    # This controls whether the Time type includes the time context.
     ('FW_USE_TIME_CONTEXT', True),
 )
 for name, value in fprime_configurable_flags:
+    # Put these flags in the global namespace for convenience.
     globals()[name] = value
 
 
+# Another part of F Prime configuration is defining what fundamental types
+# represent various things.  The following are the default type definitions.
+# We also use this list to allow users to override using command line
+# arguments.
 fprime_configurable_types = (
-    ('RecordSize', U16),
-    ('FwTimeBaseStoreType', U16),
-    ('FwTimeContextStoreType', U8),
-    ('FwPacketDescriptorType', U32),
-    ('FwOpcodeType', U32),
-    ('FwChanIdType', U32),
-    ('FwEventIdType', U32),
-    ('FwPrmIdType', U32),
-    ('FwTlmPacketizeIdType', U16),
+    ('FwTimeBaseStoreType', fptypes['U16']),
+    ('FwTimeContextStoreType', fptypes['U8']),
+    ('FwPacketDescriptorType', fptypes['U32']),
+    ('FwOpcodeType', fptypes['U32']),
+    ('FwChanIdType', fptypes['U32']),
+    ('FwEventIdType', fptypes['U32']),
+    ('FwPrmIdType', fptypes['U32']),
+    ('FwTlmPacketizeIdType', fptypes['U16']),
+    # This is not actually an F Prime configurable type definition.  Instead we
+    # define it to allow the user to configure the type used to represent the
+    # packet size in a record.  This is needed because ComLogger packets use
+    # U16 while fprime-gds recv.bin logs use U32.
+    ('RecordSize', fptypes['U16']),
 )
 for name, value in fprime_configurable_types:
+    # Define these types aliases in fptypes so they can be retrieved by name.
+    fptypes[name] = value
+    # Also put the type alias into the global namespace for convenience.
     globals()[name] = value
+
+
+#### Basic non-fundamental types -----------------------------------------------
+
+
+class Buffer():
+
+    def __init__(self, data=b''):
+        self.data = data
+
+    @classmethod
+    def decode(cls, istream, length=None):
+        self = cls()
+        self.data = istream.read(length)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.data) is bytes)
+        ostream.write(self.data)
+
+    def __bytes__(self):
+        return bytes(self.data)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return repr(self.data)
+
+    def __str__(self):
+        return str(self.data)
+
+
+class Time():
+
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        if FW_USE_TIME_BASE:
+            self.base = FwTimeBaseStoreType.decode(istream)
+        if FW_USE_TIME_CONTEXT:
+            self.context = FwTimeContextStoreType.decode(istream)
+        self.seconds = U32.decode(istream)
+        self.microseconds = U32.decode(istream)
+        return self
+
+    def encode(self, ostream):
+        if FW_USE_TIME_BASE:
+            assert(type(self.base) is FwTimeBaseStoreType)
+        if FW_USE_TIME_CONTEXT:
+            assert(type(self.context) is FwTimeContextStoreType)
+        assert(type(self.seconds) is U32)
+        assert(type(self.microseconds) is U32)
+        if FW_USE_TIME_BASE:
+            self.base.encode(ostream)
+        if FW_USE_TIME_CONTEXT:
+            self.context.encode(ostream)
+        self.seconds = U32.decode(ostream)
+        self.microseconds = U32.decode(ostream)
+
+    def __str__(self):
+        return str(float(self.seconds) + float(self.microseconds) * 1e-6)
+
+
+#### Message, record, and F Prime packet types ----------------------------------
 
 
 class Record():
 
-    def __init__(self, istream):
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
         self.offset = istream.tell()
-        self.packet_size = RecordSize(istream)
+        self.packet_size = RecordSize.decode(istream)
 
         # We slice off the input stream into a buffer and create a new input
         # stream backed by that buffer to pass to the Packet parser. We do this
@@ -72,12 +219,21 @@ class Record():
         # limit the rest of the record so that "read the rest" behavior
         # underneath works as expected and doesn't read the rest of the input
         # stream.
-        packet_buffer = istream.read(self.packet_size)
-        self.packet = Packet(io.BytesIO(packet_buffer))
+        packet_buffer = istream.read(self.packet_size.value)
+        self.packet = Packet.decode(io.BytesIO(packet_buffer))
+
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.packet_size) is RecordSize)
+        # TODO (vnguyen): Be smart about automatically calculating this.
+        self.packet_size.encode(ostream)
+        self.packet.encode(ostream)
 
 
 class Packet():
 
+    @enum_represented_as(FwPacketDescriptorType)
     class Type(enum.IntEnum):
         COMMAND = 0
         TELEM = 1
@@ -87,53 +243,87 @@ class Packet():
         IDLE = 5
         UNKNOWN = 0xFF
 
-    def __init__(self, istream):
-        self.type = type(self).Type(FwPacketDescriptorType(istream))
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.type = type(self).Type.decode(istream)
         if self.type == type(self).Type.TELEM:
-            self.payload = TelemPacket(istream)
+            self.payload = TelemPacket.decode(istream)
         elif self.type == type(self).Type.LOG:
-            self.payload = EventPacket(istream)
+            self.payload = EventPacket.decode(istream)
         elif self.type == type(self).Type.FILE:
-            self.payload = FilePacket(istream)
+            self.payload = FilePacket.decode(istream)
         else:
-            self.payload = istream.read()
+            self.payload = Buffer.decode(istream)
+        return self
 
-
-class Time():
-
-    def __init__(self, istream):
-        if FW_USE_TIME_BASE:
-            self.base = FwTimeBaseStoreType(istream)
-        if FW_USE_TIME_CONTEXT:
-            self.context = FwTimeContextStoreType(istream)
-        self.seconds = U32(istream)
-        self.microseconds = U32(istream)
-
-    def __str__(self):
-        return str(float(self.seconds) + float(self.microseconds) * 1e-6)
+    def encode(self, ostream):
+        assert(type(self.type) is type(self).Type)
+        if self.type == type(self).Type.TELEM:
+            assert(type(self.payload) is TelemPacket)
+        elif self.type == type(self).Type.LOG:
+            assert(type(self.payload) is EventPacket)
+        elif self.type == type(self).Type.FILE:
+            assert(type(self.payload) is FilePacket)
+        else:
+            assert(type(self.payload) is Buffer)
+        self.type.encode(ostream)
+        self.payload.encode(ostream)
 
 
 class TelemPacket():
 
-    def __init__(self, istream):
-        self.id = FwChanIdType(istream)
-        self.time = Time(istream)
-        self.value = istream.read()
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.id = FwChanIdType.decode(istream)
+        self.time = Time.decode(istream)
+        self.value = Buffer.decode(istream)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.id) == FwChanIdType)
+        assert(type(self.time) == Time)
+        assert(type(self.value) == Buffer)
+        self.id.encode(ostream)
+        self.time.encode(ostream)
+        self.value.encode(ostream)
 
 
 class EventPacket():
 
-    def __init__(self, istream):
-        self.id = FwEventIdType(istream)
-        self.time = Time(istream)
-        self.arguments = istream.read()
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.id = FwEventIdType.decode(istream)
+        self.time = Time.decode(istream)
+        self.arguments = Buffer.decode(istream)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.id) == FwEventIdType)
+        assert(type(self.time) == Time)
+        assert(type(self.arguments) == Buffer)
+        self.id.encode(ostream)
+        self.time.encode(ostream)
+        self.arguments.encode(ostream)
 
 
-class PathName():
+class FilePacketPathName():
 
-    def __init__(self, istream):
-        self.length = U8(istream)
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.length = U8.decode(istream)
         self.value = istream.read(self.length)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.length) == U8)
+        assert(type(self.value) == bytes)
+        assert(len(self.value) == self.length)
+        self.length.encode(ostream)
+        ostream.write(self.value)
 
     def __str__(self):
         return self.value.encode('ascii')
@@ -141,6 +331,7 @@ class PathName():
 
 class FilePacket():
 
+    @enum_represented_as(U8)
     class Type(enum.IntEnum):
         START = 0
         DATA = 1
@@ -148,48 +339,104 @@ class FilePacket():
         CANCEL = 3
         NONE = 255
 
-    def __init__(self, istream):
-        self.type = U8(istream)
-        self.sequence_index = U32(istream)
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.type = type(self).Type.decode(istream)
+        self.sequence_index = U32.decode(istream)
 
         if self.type == type(self).Type.START:
-            self.payload = FilePacketStartPayload(istream)
+            self.payload = FilePacketStartPayload.decode(istream)
         elif self.type == type(self).Type.DATA:
-            self.payload = FilePacketDataPayload(istream)
+            self.payload = FilePacketDataPayload.decode(istream)
         elif self.type == type(self).Type.END:
-            self.payload = FilePacketEndPayload(istream)
+            self.payload = FilePacketEndPayload.decode(istream)
         elif self.type == type(self).Type.CANCEL:
-            self.payload = FilePacketCancelPayload(istream)
+            self.payload = FilePacketCancelPayload.decode(istream)
         else:
             raise KeyError(f'Encountered unknown FilePacket type: {self.type}')
+
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.type) is type(self).Type)
+        assert(type(self.sequence_index) is U32)
+        assert(len(self.value) == self.length)
+        if self.type == type(self).Type.START:
+            assert(type(self.payload) is FilePacketStartPayload)
+        elif self.type == type(self).Type.DATA:
+            assert(type(self.payload) is FilePacketDataPayload)
+        elif self.type == type(self).Type.END:
+            assert(type(self.payload) is FilePacketEndPayload)
+        elif self.type == type(self).Type.CANCEL:
+            assert(type(self.payload) is FilePacketCancelPayload)
+        else:
+            raise KeyError(f'Encountered unknown FilePacket type: {self.type}')
+        self.type.encode(ostream)
+        self.sequence_index.encode(ostream)
+        self.payload.encode(ostream)
 
 
 class FilePacketStartPayload():
 
-    def __init__(self, istream):
-        self.file_size = U32(istream)
-        self.source_path = PathName(istream)
-        self.destination_path = PathName(istream)
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.file_size = U32.decode(istream)
+        self.source_path = FilePacketPathName.decode(istream)
+        self.destination_path = FilePacketPathName.decode(istream)
+        return self
+
+    def encode(self, ostream):
+        self.file_size.encode(ostream)
+        self.source_path.encode(ostream)
+        self.destination_path.encode(ostream)
 
 
 class FilePacketDataPayload():
 
-    def __init__(self, istream):
-        self.byte_offset = U32(istream)
-        self.data_size = U16(istream)
-        self.data = istream.read(self.data_size)
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.byte_offset = U32.decode(istream)
+        self.data_size = U16.decode(istream)
+        self.data = Buffer.decode(istream, self.data_size)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.byte_offset) is U32)
+        assert(type(self.data_size) is U16)
+        assert(type(self.data) is Buffer)
+        self.byte_offset.encode(ostream)
+        self.data_size.encode(ostream)
+        self.data.encode(ostream)
 
 
 class FilePacketEndPayload():
 
-    def __init__(self, istream):
-        self.checksum = U32(istream)
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        self.checksum = U32.decode(istream)
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.checksum) is U32)
+        self.checksum.encode(ostream)
 
 
 class FilePacketCancelPayload():
 
-    def __init__(self, istream):
+    @classmethod
+    def decode(cls, istream):
+        self = cls()
+        return self
+
+    def encode(self, ostream):
         pass
+
+
+#### Dictionary ----------------------------------------------------------------
 
 
 class FprimeDictionary():
@@ -215,7 +462,9 @@ class FprimeDictionary():
             pass
 
         def __repr__(self):
-            return f'{{"name": "{self.name}", "items": [{", ".join(str(x) for x in self.items)}]}}'
+            return '{{"name": "{}", "items": [{}]}}'.format(
+                self.name,
+                ", ".join(str(x) for x in self.items))
 
     class Serializable():
 
@@ -387,7 +636,7 @@ class TsvPrinter():
             f'\t{packet.type.name}'
             f'\t{packet.type.value}')
         if record.packet.type == Packet.Type.TELEM:
-            channel = self._d and self._d.channels_by_id.get(payload.id, None)
+            channel = self._d and self._d.channels_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
                 f'\t{payload.id}'
@@ -397,10 +646,10 @@ class TsvPrinter():
                 f'\t{getattr(channel, "name", "")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.value)}'
-                f'\t{payload.value.hex() if len(payload.value) else ""}'
+                f'\t{payload.value.data.hex() if len(payload.value) else ""}'
                 '\t\t\t\t\t\t\t\t\t\t')
         elif record.packet.type == Packet.Type.LOG:
-            event = self._d and self._d.events_by_id.get(payload.id, None)
+            event = self._d and self._d.events_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
                 '\t\t\t\t\t\t\t\t'
@@ -412,12 +661,12 @@ class TsvPrinter():
                 f'\t{getattr(event, "severity_str", "")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.arguments)}'
-                f'\t{payload.arguments.hex() if len(payload.arguments) else ""}'
+                f'\t{payload.arguments.data.hex() if len(payload.arguments) else ""}'
                 '\t')
         else:
             sys.stdout.write(
                 '\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t'
-                f'\t{payload.hex()}')
+                f'\t{payload.data.hex()}')
         sys.stdout.write('\n')
 
     def print_footer(self):
@@ -467,7 +716,7 @@ class VnlogPrinter():
             f'\t{packet.type.name}'
             f'\t{packet.type.value}')
         if record.packet.type == Packet.Type.TELEM:
-            channel = self._d and self._d.channels_by_id.get(payload.id, None)
+            channel = self._d and self._d.channels_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
                 f'\t{payload.id}'
@@ -477,10 +726,10 @@ class VnlogPrinter():
                 f'\t{getattr(channel, "name", "-")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.value)}'
-                f'\t{payload.value.hex() if len(payload.value) else "-"}'
+                f'\t{payload.value.data.hex() if len(payload.value) else "-"}'
                 '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-')
         elif record.packet.type == Packet.Type.LOG:
-            event = self._d and self._d.events_by_id.get(payload.id, None)
+            event = self._d and self._d.events_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
                 '\t-\t-\t-\t-\t-\t-\t-\t-'
@@ -492,12 +741,12 @@ class VnlogPrinter():
                 f'\t{getattr(event, "severity_str", "-")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.arguments)}'
-                f'\t{payload.arguments.hex() if len(payload.arguments) else "-"}'
+                f'\t{payload.arguments.data.hex() if len(payload.arguments) else "-"}'
                 '\t-')
         else:
             sys.stdout.write(
                 '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-'
-                f'\t{payload.hex()}')
+                f'\t{payload.data.hex()}')
         sys.stdout.write('\n')
 
     def print_footer(self):
@@ -537,7 +786,9 @@ if __name__ == '__main__':
         default=None,
         required=False,
         help='''
-            path to F Prime dictionary used to interpret packet contents; default is to use no dictionary and display packet contents as binary blobs''')
+            path to F Prime dictionary used to interpret packet contents;
+            default is to use no dictionary and display packet contents as
+            binary blobs''')
 
     for name, default in fprime_configurable_flags:
         parser.add_argument(
@@ -552,24 +803,27 @@ if __name__ == '__main__':
                 be a Python truthy like 'True' or 'False'; default
                 is \'{default}\'''')
 
-    def NativeType(type_name):
-        if type_name in native_types_by_name:
-            return native_types_by_name[type_name]
-        raise KeyError(f'Unknown native type name "{type_name}"')
+    def FundamentalType(type_name):
+        if type_name in fptypes_fundamental:
+            return fptypes_fundamental[type_name]
+        raise KeyError(f'Unknown fundamental_type name "{type_name}"')
 
     for name, default in fprime_configurable_types:
         parser.add_argument(
             f'--{name}',
-            metavar='NATIVE_TYPE',
+            metavar='FUNDAMENTAL_TYPE',
             dest=name,
             action='store',
-            type=NativeType,
+            type=FundamentalType,
             default=default,
-            help=f'''
-                sets the F Prime configuration for {name}; must be one
-                of the following native types:
-                {', '.join("'" + name + "'" for name, _ in native_types)};
-                default is \'{default.__name__}\'''')
+            help='''
+                sets the F Prime configuration for {}; must be one of the
+                following fundamental_types: {}; default is \'{}\''''.format(
+                    name,
+                    ', '.join(
+                        "'" + name + "'"
+                        for name, _ in fundamental_type_specs),
+                    default.__name__))
 
     args = parser.parse_args()
 
@@ -593,7 +847,7 @@ if __name__ == '__main__':
     try:
         record_index = 0
         while True:
-            record = Record(args.istream)
+            record = Record.decode(args.istream)
             printer.print_record(record)
             record_index += 1
     except BrokenPipeError:
