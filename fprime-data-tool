@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+import enum
+import io
+import struct
+
+
+native_types = (
+    ('I8', '>b'),
+    ('U8', '>B'),
+    ('I16', '>h'),
+    ('U16', '>H'),
+    ('I32', '>i'),
+    ('U32', '>I'),
+    ('I64', '>q'),
+    ('U64', '>Q'),
+    ('F32', '>f'),
+    ('F64', '>d'),
+)
+
+
+def make_native_type(struct_format):
+    struct_format = struct.Struct(struct_format)
+
+    def f(istream):
+        return struct_format.unpack(istream.read(struct_format.size))[0]
+
+    return f
+
+
+for name, struct_format in native_types:
+    globals()[name] = make_native_type(struct_format)
+    globals()[name].__name__ = name
+
+
+native_types_by_name = {name: globals()[name] for name, _ in native_types}
+
+
+fprime_configurable_flags = (
+    ('FW_USE_TIME_BASE', True),
+    ('FW_USE_TIME_CONTEXT', True),
+)
+for name, value in fprime_configurable_flags:
+    globals()[name] = value
+
+
+fprime_configurable_types = (
+    ('RecordSize', U16),
+    ('FwTimeBaseStoreType', U16),
+    ('FwTimeContextStoreType', U8),
+    ('FwPacketDescriptorType', U32),
+    ('FwOpcodeType', U32),
+    ('FwChanIdType', U32),
+    ('FwEventIdType', U32),
+    ('FwPrmIdType', U32),
+    ('FwTlmPacketizeIdType', U16),
+)
+for name, value in fprime_configurable_types:
+    globals()[name] = value
+
+
+class Record():
+
+    def __init__(self, istream):
+        self.offset = istream.tell()
+        self.packet_size = RecordSize(istream)
+
+        # We slice off the input stream into a buffer and create a new input
+        # stream backed by that buffer to pass to the Packet parser. We do this
+        # because some parsers nested underneath the Packet parser will "read
+        # the rest" but without the size context here. For example, the event
+        # and telemetry packet parsers do this. We use the size context here to
+        # limit the rest of the record so that "read the rest" behavior
+        # underneath works as expected and doesn't read the rest of the input
+        # stream.
+        packet_buffer = istream.read(self.packet_size)
+        self.packet = Packet(io.BytesIO(packet_buffer))
+
+
+class Packet():
+
+    class Type(enum.IntEnum):
+        COMMAND = 0
+        TELEM = 1
+        LOG = 2
+        FILE = 3
+        PACKETIZED_TLM = 4
+        IDLE = 5
+        UNKNOWN = 0xFF
+
+    def __init__(self, istream):
+        self.type = type(self).Type(FwPacketDescriptorType(istream))
+        if self.type == type(self).Type.TELEM:
+            self.payload = TelemPacket(istream)
+        elif self.type == type(self).Type.LOG:
+            self.payload = EventPacket(istream)
+        elif self.type == type(self).Type.FILE:
+            self.payload = FilePacket(istream)
+        else:
+            self.payload = istream.read()
+
+
+class Time():
+
+    def __init__(self, istream):
+        if FW_USE_TIME_BASE:
+            self.base = FwTimeBaseStoreType(istream)
+        if FW_USE_TIME_CONTEXT:
+            self.context = FwTimeContextStoreType(istream)
+        self.seconds = U32(istream)
+        self.microseconds = U32(istream)
+
+    def __str__(self):
+        return str(float(self.seconds) + float(self.microseconds) * 1e-6)
+
+
+class TelemPacket():
+
+    def __init__(self, istream):
+        self.id = FwChanIdType(istream)
+        self.time = Time(istream)
+        self.value = istream.read()
+
+
+class EventPacket():
+
+    def __init__(self, istream):
+        self.id = FwEventIdType(istream)
+        self.time = Time(istream)
+        self.arguments = istream.read()
+
+
+class PathName():
+
+    def __init__(self, istream):
+        self.length = U8(istream)
+        self.value = istream.read(self.length)
+
+    def __str__(self):
+        return self.value.encode('ascii')
+
+
+class FilePacket():
+
+    class Type(enum.IntEnum):
+        START = 0
+        DATA = 1
+        END = 2
+        CANCEL = 3
+        NONE = 255
+
+    def __init__(self, istream):
+        self.type = U8(istream)
+        self.sequence_index = U32(istream)
+
+        if self.type == type(self).Type.START:
+            self.payload = FilePacketStartPayload(istream)
+        elif self.type == type(self).Type.DATA:
+            self.payload = FilePacketDataPayload(istream)
+        elif self.type == type(self).Type.END:
+            self.payload = FilePacketEndPayload(istream)
+        elif self.type == type(self).Type.CANCEL:
+            self.payload = FilePacketCancelPayload(istream)
+        else:
+            raise KeyError(f'Encountered unknown FilePacket type: {self.type}')
+
+
+class FilePacketStartPayload():
+
+    def __init__(self, istream):
+        self.file_size = U32(istream)
+        self.source_path = PathName(istream)
+        self.destination_path = PathName(istream)
+
+
+class FilePacketDataPayload():
+
+    def __init__(self, istream):
+        self.byte_offset = U32(istream)
+        self.data_size = U16(istream)
+        self.data = istream.read(self.data_size)
+
+
+class FilePacketEndPayload():
+
+    def __init__(self, istream):
+        self.checksum = U32(istream)
+
+
+class FilePacketCancelPayload():
+
+    def __init__(self, istream):
+        pass
+
+
+class FprimeDictionary():
+
+    class Enum():
+
+        class Item():
+
+            def __init__(self, elem):
+                self.name = elem.get('name')
+                self.value_str = elem.get('value')
+                self.value = int(self.value_str)
+                self.description = elem.get('description')
+
+            def __repr__(self):
+                return f'("{self.name}", "{self.value_str}", "{self.description}")'
+
+        def __init__(self, elem):
+            self.name = elem.get('type')
+            self.items = [type(self).Item(x) for x in elem.findall('item')]
+
+        def decode(self, istream):
+            pass
+
+        def __repr__(self):
+            return f'{{"name": "{self.name}", "items": [{", ".join(str(x) for x in self.items)}]}}'
+
+    class Serializable():
+
+        def decode(self, istream):
+            pass
+
+    class Array():
+
+        def decode(self, istream):
+            pass
+
+    class Command():
+        pass
+
+    class Event():
+
+        class Severity(enum.IntEnum):
+            FATAL = 1
+            WARNING_HI = 2
+            WARNING_LO = 3
+            COMMAND = 4
+            ACTIVITY_HI = 5
+            ACTIVITY_LO = 6
+            DIAGNOSTIC = 7
+
+        class Argument():
+
+            def __init__(self, elem):
+                self.name = elem.get('name')
+                self.description = elem.get('description')
+                self.length = int(elem.get('len')) if elem.get('len') else None
+                self.type_str = elem.get('type')
+                self.type = None
+
+            def __repr__(self):
+                return f'("{self.name}", "{self.description}", "{self.type_str}")'
+
+        def __init__(self, elem):
+            self.component = elem.get('component')
+            self.name = elem.get('name')
+            self.topology_name = f'{self.component}.{self.name}'
+            self.id_str = elem.get('id')
+            self.id = int(
+                self.id_str,
+                base=16 if self.id_str.startswith('0x') else 10)
+            self.severity_str = elem.get('severity')
+            self.severity = type(self).Severity[self.severity_str]
+            self.description = elem.get('description')
+            self.format_string = elem.get('format_string')
+            self.args = [
+                type(self).Argument(x)
+                for x in elem.find('args').findall('arg')]
+
+        def __repr__(self):
+            return f'{{"component": "{self.component}", "name": "{self.name}", "id": "{self.id_str}"}}'
+
+    class Channel():
+
+        def __init__(self, elem):
+            self.component = elem.get('component')
+            self.name = elem.get('name')
+            self.topology_name = f'{self.component}.{self.name}'
+            self.id_str = elem.get('id')
+            self.id = int(
+                self.id_str,
+                base=16 if self.id_str.startswith('0x') else 10)
+            self.format_string = elem.get('format_string')
+            self.description = elem.get('description')
+            self.type_str = elem.get('type')
+            self.type = None
+
+        def __repr__(self):
+            return f'{{"component": "{self.component}", "name": "{self.name}", "id": "{self.id_str}"}}'
+
+    class Parameter():
+        pass
+
+    def __init__(self, file_path):
+        self.enums = {}
+        self.serializables = {}
+        self.arrays = {}
+        self.commands = {}
+        self.events = {}
+        self.events_by_id = {}
+        self.channels = {}
+        self.channels_by_id = {}
+        self.parameters = {}
+        self.types = {}
+
+        from xml.etree import ElementTree
+        tree = ElementTree.parse(file_path)
+        root = tree.getroot()
+        for collection in root:
+            if collection.tag == 'enums':
+                for elem in collection:
+                    if elem.tag == 'enum':
+                        enum = type(self).Enum(elem)
+                        self.enums[enum.name] = enum
+            elif collection.tag == 'serializables':
+                for elem in collection:
+                    if elem.tag == 'serializable':
+                        pass
+            elif collection.tag == 'arrays':
+                for elem in collection:
+                    if elem.tag == 'array':
+                        pass
+            elif collection.tag == 'commands':
+                for elem in collection:
+                    if elem.tag == 'command':
+                        pass
+            elif collection.tag == 'events':
+                for elem in collection:
+                    if elem.tag == 'event':
+                        event = type(self).Event(elem)
+                        self.events[(event.component, event.name)] = event
+                        self.events_by_id[event.id] = event
+            elif collection.tag == 'channels':
+                for elem in collection:
+                    if elem.tag == 'channel':
+                        channel = type(self).Channel(elem)
+                        self.channels[(channel.component, channel.name)] = channel
+                        self.channels_by_id[channel.id] = channel
+            elif collection.tag == 'parameters':
+                for elem in collection:
+                    if elem.tag == 'parameter':
+                        pass
+
+
+class TsvPrinter():
+
+    def __init__(self, fprime_dictionary=None):
+        self._d = fprime_dictionary
+
+    def print_header(self):
+        sys.stdout.write(
+            'record_index'
+            '\trecord_offset'
+            '\tpacket_size'
+            '\tpacket_type_name'
+            '\tpacket_type_value'
+            '\tpacket_time'
+            '\ttelem_id'
+            '\ttelem_id_hex'
+            '\ttelem_topology_name'
+            '\ttelem_component'
+            '\ttelem_name'
+            '\ttelem_time'
+            '\ttelem_value_size'
+            '\ttelem_value'
+            '\tevent_id'
+            '\tevent_id_hex'
+            '\tevent_topology_name'
+            '\tevent_component'
+            '\tevent_name'
+            '\tevent_severity'
+            '\tevent_time'
+            '\tevent_arguments_size'
+            '\tevent_arguments'
+            '\tpayload'
+            '\n')
+
+    def print_record(self, record):
+        packet = record.packet
+        payload = record.packet.payload
+        sys.stdout.write(
+            f'{record_index}'
+            f'\t{record.offset}'
+            f'\t{record.packet_size}'
+            f'\t{packet.type.name}'
+            f'\t{packet.type.value}')
+        if record.packet.type == Packet.Type.TELEM:
+            channel = self._d and self._d.channels_by_id.get(payload.id, None)
+            sys.stdout.write(
+                f'\t{payload.time}'
+                f'\t{payload.id}'
+                f'\t{payload.id:#x}'
+                f'\t{getattr(channel, "topology_name", "")}'
+                f'\t{getattr(channel, "component", "")}'
+                f'\t{getattr(channel, "name", "")}'
+                f'\t{payload.time}'
+                f'\t{len(payload.value)}'
+                f'\t{payload.value.hex() if len(payload.value) else ""}'
+                '\t\t\t\t\t\t\t\t\t\t')
+        elif record.packet.type == Packet.Type.LOG:
+            event = self._d and self._d.events_by_id.get(payload.id, None)
+            sys.stdout.write(
+                f'\t{payload.time}'
+                '\t\t\t\t\t\t\t\t'
+                f'\t{payload.id}'
+                f'\t{payload.id:#x}'
+                f'\t{getattr(event, "topology_name", "")}'
+                f'\t{getattr(event, "component", "")}'
+                f'\t{getattr(event, "name", "")}'
+                f'\t{getattr(event, "severity_str", "")}'
+                f'\t{payload.time}'
+                f'\t{len(payload.arguments)}'
+                f'\t{payload.arguments.hex() if len(payload.arguments) else ""}'
+                '\t')
+        else:
+            sys.stdout.write(
+                '\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t'
+                f'\t{payload.hex()}')
+        sys.stdout.write('\n')
+
+    def print_footer(self):
+        pass
+
+
+class VnlogPrinter():
+
+    def __init__(self, fprime_dictionary=None):
+        self._d = fprime_dictionary
+
+    def print_header(self):
+        sys.stdout.write(
+            '#record_index'
+            '\trecord_offset'
+            '\tpacket_size'
+            '\tpacket_type_name'
+            '\tpacket_type_value'
+            '\tpacket_time'
+            '\ttelem_id'
+            '\ttelem_id_hex'
+            '\ttelem_topology_name'
+            '\ttelem_component'
+            '\ttelem_name'
+            '\ttelem_time'
+            '\ttelem_value_size'
+            '\ttelem_value'
+            '\tevent_id'
+            '\tevent_id_hex'
+            '\tevent_topology_name'
+            '\tevent_component'
+            '\tevent_name'
+            '\tevent_severity'
+            '\tevent_time'
+            '\tevent_arguments_size'
+            '\tevent_arguments'
+            '\tpayload'
+            '\n')
+
+    def print_record(self, record):
+        packet = record.packet
+        payload = record.packet.payload
+        sys.stdout.write(
+            f'{record_index}'
+            f'\t{record.offset}'
+            f'\t{record.packet_size}'
+            f'\t{packet.type.name}'
+            f'\t{packet.type.value}')
+        if record.packet.type == Packet.Type.TELEM:
+            channel = self._d and self._d.channels_by_id.get(payload.id, None)
+            sys.stdout.write(
+                f'\t{payload.time}'
+                f'\t{payload.id}'
+                f'\t{payload.id:#x}'
+                f'\t{getattr(channel, "topology_name", "-")}'
+                f'\t{getattr(channel, "component", "-")}'
+                f'\t{getattr(channel, "name", "-")}'
+                f'\t{payload.time}'
+                f'\t{len(payload.value)}'
+                f'\t{payload.value.hex() if len(payload.value) else "-"}'
+                '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-')
+        elif record.packet.type == Packet.Type.LOG:
+            event = self._d and self._d.events_by_id.get(payload.id, None)
+            sys.stdout.write(
+                f'\t{payload.time}'
+                '\t-\t-\t-\t-\t-\t-\t-\t-'
+                f'\t{payload.id}'
+                f'\t{payload.id:#x}'
+                f'\t{getattr(event, "topology_name", "-")}'
+                f'\t{getattr(event, "component", "-")}'
+                f'\t{getattr(event, "name", "-")}'
+                f'\t{getattr(event, "severity_str", "-")}'
+                f'\t{payload.time}'
+                f'\t{len(payload.arguments)}'
+                f'\t{payload.arguments.hex() if len(payload.arguments) else "-"}'
+                '\t-')
+        else:
+            sys.stdout.write(
+                '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-'
+                f'\t{payload.hex()}')
+        sys.stdout.write('\n')
+
+    def print_footer(self):
+        pass
+
+
+if __name__ == '__main__':
+    import argparse
+    import pathlib
+    import sys
+
+    parser = argparse.ArgumentParser(description='''
+        fprime-data-tool is a command line utility to read F Prime data in
+        different formats and configurations and display them in different
+        formts. It can even work without a dictionary which is useful for
+        sanity checking at the packet level. With an F Prime FSW dictionary
+        specified it can interpret the data.''')
+
+    parser.add_argument(
+        'istream',
+        nargs='?',
+        type=argparse.FileType('rb'),
+        default=sys.stdin.buffer,
+        help='''
+            input ComLogger file (default: read from stdin)''')
+    parser.add_argument(
+        '-F', '--output-format',
+        action='store',
+        type=str,
+        choices=('tsv', 'vnlog'),
+        default='vnlog',
+        help=f'''
+            selects the output format; default is \'vnlog\'''')
+    parser.add_argument(
+        '-d', '--dictionary',
+        type=pathlib.Path,
+        default=None,
+        required=False,
+        help='''
+            path to F Prime dictionary used to interpret packet contents; default is to use no dictionary and display packet contents as binary blobs''')
+
+    for name, default in fprime_configurable_flags:
+        parser.add_argument(
+            f'--{name}',
+            metavar='BOOL',
+            dest=name,
+            action='store',
+            type=bool,
+            default=default,
+            help=f'''
+                sets the F Prime configuration for {name}; must
+                be a Python truthy like 'True' or 'False'; default
+                is \'{default}\'''')
+
+    def NativeType(type_name):
+        if type_name in native_types_by_name:
+            return native_types_by_name[type_name]
+        raise KeyError(f'Unknown native type name "{type_name}"')
+
+    for name, default in fprime_configurable_types:
+        parser.add_argument(
+            f'--{name}',
+            metavar='NATIVE_TYPE',
+            dest=name,
+            action='store',
+            type=NativeType,
+            default=default,
+            help=f'''
+                sets the F Prime configuration for {name}; must be one
+                of the following native types:
+                {', '.join("'" + name + "'" for name, _ in native_types)};
+                default is \'{default.__name__}\'''')
+
+    args = parser.parse_args()
+
+    for name, _ in fprime_configurable_flags:
+        globals()[name] = getattr(args, name)
+
+    for name, _ in fprime_configurable_types:
+        globals()[name] = getattr(args, name)
+
+    fprime_dictionary = args.dictionary and FprimeDictionary(args.dictionary)
+
+    if args.output_format == 'tsv':
+        printer = TsvPrinter(fprime_dictionary)
+    elif args.output_format == 'vnlog':
+        printer = VnlogPrinter(fprime_dictionary)
+    else:
+        raise KeyError(f'Unknown printer specified: "{args.output_format}"')
+
+    printer.print_header()
+
+    try:
+        record_index = 0
+        while True:
+            record = Record(args.istream)
+            printer.print_record(record)
+            record_index += 1
+    except BrokenPipeError:
+        pass
+
+    printer.print_footer()
