@@ -1073,7 +1073,8 @@ class FprimeDictionary():
                         f'WARNING: Could not find type "{arg.type_str}" for '
                         f'argument "{arg.name}" of command '
                         f'"{command.topology_name}" in types namespace\n')
-                arg.type = self.types.get(arg.type_str, None)
+                    continue
+                arg.type = self.types[arg.type_str]
 
         for event in self.events.values():
             for i, arg in enumerate(event.args):
@@ -1082,6 +1083,7 @@ class FprimeDictionary():
                         f'WARNING: Could not find type "{arg.type_str}" for '
                         f'argument "{arg.name}" of event '
                         f'"{event.topology_name}" in types namespace\n')
+                    continue
                 # In the logs I'm testing with the event argument string
                 # appears to have a U16 length at the front.  This is strange
                 # because based on code reading a length is not added by
@@ -1094,16 +1096,17 @@ class FprimeDictionary():
                 # argument type we intercept and instead set it to
                 # LogArgString.
                 if arg.type_str == 'string':
-                    arg.type = self.types.get('LogArgString', None)
+                    arg.type = self.types['LogArgString']
                 else:
-                    arg.type = self.types.get(arg.type_str, None)
+                    arg.type = self.types[arg.type_str]
 
         for channel in self.channels.values():
             if not channel.type_str in self.types:
                 sys.stderr.write(
                     f'WARNING: Could not find type "{channel.type_str}" for '
                     f'channel "{channel.topology_name}" in types namespace\n')
-            channel.type = self.types.get(channel.type_str, None)
+                continue
+            channel.type = self.types[channel.type_str]
 
 
 #### Printers ------------------------------------------------------------------
