@@ -66,6 +66,62 @@ def enum_represented_as(enum_underlying_type):
     return decorator
 
 
+def make_array_type(name, element_type, size):
+    _element_type = element_type
+    _size = size
+
+    class Array():
+        element_type = _element_type
+        size = _size
+
+        def __init__(self, elements):
+            self.elements = elements
+            assert(len(self.elements) == type(self).size)
+            for element in self.elements:
+                assert(type(element) == type(self).element_type)
+
+        def as_json(self):
+            return '[' + ', '.join(x.as_json() for x in self.elements) + ']'
+
+        @classmethod
+        def decode(cls, istream, fsw_dict=None, length=None):
+            elements = [
+                cls.element_type.decode(istream, fsw_dict)
+                for i in range(cls.size)
+            ]
+            self = cls(elements)
+            return self
+
+        def encode(self, ostream):
+            assert(type(self.elements) is list)
+            assert(len(self.elements) == type(self).size)
+            for element in self.elements:
+                assert(type(element) == type(self).element_type)
+                element.encode(ostream)
+
+        def __getitem__(self, index):
+            return self.elements[index]
+
+        def __iter__(self):
+            return iter(self)
+
+        def __len__(self):
+            return len(self.elements)
+
+        def __repr__(self):
+            return repr(self.elements)
+
+        def __setitem__(self, index, value):
+            self.elements[index].value = value
+
+        def __str__(self):
+            return str(self.elements)
+
+    Array.__name__ = name
+
+    return Array
+
+
 #### F Prime configuration flags -----------------------------------------------
 
 
@@ -909,7 +965,27 @@ class FprimeDictionary():
         pass
 
     class Array():
-        pass
+
+        class Default():
+
+            def __init__(self, elem):
+                self.value = elem.get('value')
+
+        def __init__(self, elem):
+            self.name = elem.get('name')
+            self.element_type_str = elem.get('type')
+            self.element_type = None
+            self.type_id_str = elem.get('type_id')
+            self.type_id = int(
+                self.type_id_str,
+                base=16 if self.type_id_str.startswith('0x') else 10)
+            self.size_str = elem.get('size')
+            self.size = int(self.size_str)
+            self.format = elem.get('format')
+            self.defaults = [
+                type(self).Default(x)
+                for x in elem.find('defaults').findall('default')]
+            self.type = None
 
     class Command():
 
@@ -1025,7 +1101,8 @@ class FprimeDictionary():
             elif collection.tag == 'arrays':
                 for elem in collection:
                     if elem.tag == 'array':
-                        pass
+                        array = type(self).Array(elem)
+                        self.arrays[array.name] = array
             elif collection.tag == 'commands':
                 for elem in collection:
                     if elem.tag == 'command':
@@ -1062,8 +1139,16 @@ class FprimeDictionary():
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
             self.types[enum_def.name] = enum_def.type
-            # TODO (vnguyen): Serializables
-            # TODO (vnguyen): Arrays
+        # TODO (vnguyen): Serializables
+        for array_def in self.arrays.values():
+            if not array_def.element_type_str in self.types:
+                sys.stderr.write(
+                    'WARNING: Could not find type '
+                    f'"{array_def.element_type_str}" for '
+                    f'array "{array_def.name}" in types namespace\n')
+                continue
+            array_def.type = make_array_type(array_def.name, self.types[array_def.element_type_str], array_def.size)
+            self.types[array_def.name] = array_def.type
 
     def resolve_types(self):
         for command in self.commands.values():
