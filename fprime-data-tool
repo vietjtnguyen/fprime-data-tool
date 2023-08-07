@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+import copy
 import enum
 import io
 import struct
 
 
-def as_json_obj_helper(obj, keys, fprime_dict=None, extended_dict=None):
+def as_json_obj_helper(obj, keys, extended_dict=None):
     attrs = list(
-        f'"{key}": {getattr(obj, key).as_json(fprime_dict)}'
+        f'"{key}": {getattr(obj, key).as_json()}'
         for key in keys)
     if extended_dict:
         attrs.extend(
@@ -21,7 +22,7 @@ def as_json_obj_helper(obj, keys, fprime_dict=None, extended_dict=None):
 fp_types = {}
 def register_fp_types(name=None):
     def register_fp_types_decorator(cls):
-        fp_types_custom[name or cls.__name__] = cls
+        fp_types[name or cls.__name__] = cls
         return cls
     return register_fp_types_decorator
 
@@ -41,8 +42,8 @@ def register_fp_types_custom(name=None):
 # type.
 def enum_represented_as(enum_underlying_type):
     def decorator(type):
-        def decode(cls, istream):
-            untyped = enum_underlying_type.decode(istream)
+        def decode(cls, istream, fsw_dict=None, length=None):
+            untyped = enum_underlying_type.decode(istream, fsw_dict)
             return cls(untyped.value)
         type.decode = classmethod(decode)
 
@@ -51,13 +52,33 @@ def enum_represented_as(enum_underlying_type):
             untyped.encode(ostream)
         type.encode = encode
 
-        def as_json(self, fprime_dict=None):
+        def as_json(self):
             return f'"{self.name}"'
         type.as_json = as_json
+
+        def __str__(self):
+            return self.name
+        type.__str__ = __str__
 
         return type
 
     return decorator
+
+
+#### F Prime configuration flags -----------------------------------------------
+
+
+# These are F Prime configuration flags (preprocessor definitions) that affect
+# the format of data to be encoded/decoded.
+fprime_configurable_flags = (
+    # This controls whether the Time type includes the time base.
+    ('FW_USE_TIME_BASE', True),
+    # This controls whether the Time type includes the time context.
+    ('FW_USE_TIME_CONTEXT', True),
+)
+for name, value in fprime_configurable_flags:
+    # Put these flags in the global namespace for convenience.
+    globals()[name] = value
 
 
 #### Fundamental types ---------------------------------------------------------
@@ -74,15 +95,15 @@ def make_fundamental_type(name, struct_format):
             self.value = value
 
         @classmethod
-        def decode(cls, istream):
+        def decode(cls, istream, fsw_dict=None, length=None):
             data = istream.read(fundamental_struct.size)
             return cls(fundamental_struct.unpack(data)[0])
 
         def encode(self, ostream):
             return ostream.write(fundamental_struct.pack(self.value))
 
-        def as_json(self, fprime_dict=None):
-            return str(self.value)
+        def as_json(self):
+            return str(self)
 
         def __float__(self):
             return float(self.value)
@@ -108,6 +129,7 @@ def make_fundamental_type(name, struct_format):
 # types we construct them from this specification which is a tuple of name and
 # struct format.
 fundamental_type_specs = (
+    ('bool', '>?'),
     ('I8', '>b'),
     ('U8', '>B'),
     ('I16', '>h'),
@@ -129,12 +151,21 @@ for name, struct_format in fundamental_type_specs:
     globals()[name] = fp_types[name]
 
 
-#### F Prime configuration -----------------------------------------------------
+# We make one exceptional change to bgol so that the type encodes as a string
+# nicely. The Pythonic form True and False are not valid JSON literals.
+fp_types['bool'].__str__ = lambda self: 'true' if self.value else 'false'
+
+
+#### F Prime configurable types ------------------------------------------------
 
 
 # These are F Prime configuration flags (preprocessor definitions) that affect
 # the format of data to be encoded/decoded.
 fprime_configurable_flags = (
+    # Value encoded during serialization for boolean true.
+    ('FW_SERIALIZE_TRUE_VALUE', 0xFF),
+    # Value encoded during serialization for boolean false.
+    ('FW_SERIALIZE_FALSE_VALUE', 0x00),
     # This controls whether the Time type includes the time base.
     ('FW_USE_TIME_BASE', True),
     # This controls whether the Time type includes the time context.
@@ -175,11 +206,11 @@ class Buffer():
     def __init__(self, data=b''):
         self.data = data
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         return f'"0x{self.data.hex()}"'
 
     @classmethod
-    def decode(cls, istream, length=None):
+    def decode(cls, istream, fsw_dict=None, length=None):
         '''
         Decodes a buffer object from the binary input stream by simply reading
         the data from the input stream as a bytes object and storing it in the
@@ -209,17 +240,19 @@ class Buffer():
         return str(self.data)
 
 
+@register_fp_types('string')
 @register_fp_types_custom()
 class AsciiString():
 
     def __init__(self, string=b''):
         self.string = string
 
-    def as_json(self, fprime_dict=None):
-        return f'"{self.string}"'
+    def as_json(self):
+        import json
+        return json.dumps(self.string)
 
     @classmethod
-    def decode(cls, istream, length=None):
+    def decode(cls, istream, fsw_dict=None, length=None):
         '''
         Decodes an ASCII string object from the binary input stream by simply
         reading the string from the input stream as a bytes object, decoding it
@@ -250,11 +283,11 @@ class AsciiString():
         return str(self.string)
 
 
-@register_fp_types()
+@register_fp_types('Fw::Time')
 @register_fp_types_custom()
 class Time():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         import datetime
         unix_seconds = float(self.seconds) + float(self.microseconds) * 1e-6
         utc_datetime = datetime.datetime.utcfromtimestamp(unix_seconds)
@@ -283,18 +316,17 @@ class Time():
         return as_json_obj_helper(
             self,
             ('base', 'context', 'seconds', 'microseconds'),
-            fprime_dict,
             extended_dict)
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         if FW_USE_TIME_BASE:
-            self.base = FwTimeBaseStoreType.decode(istream)
+            self.base = FwTimeBaseStoreType.decode(istream, fsw_dict)
         if FW_USE_TIME_CONTEXT:
-            self.context = FwTimeContextStoreType.decode(istream)
-        self.seconds = U32.decode(istream)
-        self.microseconds = U32.decode(istream)
+            self.context = FwTimeContextStoreType.decode(istream, fsw_dict)
+        self.seconds = U32.decode(istream, fsw_dict)
+        self.microseconds = U32.decode(istream, fsw_dict)
         return self
 
     def encode(self, ostream):
@@ -308,8 +340,8 @@ class Time():
             self.base.encode(ostream)
         if FW_USE_TIME_CONTEXT:
             self.context.encode(ostream)
-        self.seconds = U32.decode(ostream)
-        self.microseconds = U32.decode(ostream)
+        self.seconds = U32.decode(ostream, fsw_dict)
+        self.microseconds = U32.decode(ostream, fsw_dict)
 
     def __str__(self):
         return str(float(self.seconds) + float(self.microseconds) * 1e-6)
@@ -324,20 +356,19 @@ def create_record_class(name, packet_size_type):
     @register_fp_types_custom(name)
     class Record():
 
-        def as_json(self, fprime_dict=None):
+        def as_json(self):
             return as_json_obj_helper(
                 self,
                 ('packet_size', 'packet'),
-                fprime_dict,
                 extended_dict={
                     "offset": str(self.offset)
                 })
 
         @classmethod
-        def decode(cls, istream):
+        def decode(cls, istream, fsw_dict=None, length=None):
             self = cls()
             self.offset = istream.tell()
-            self.packet_size = PacketSizeType.decode(istream)
+            self.packet_size = PacketSizeType.decode(istream, fsw_dict)
 
             # We slice off the input stream into a buffer and create a new
             # input stream backed by that buffer to pass to the Packet parser.
@@ -348,7 +379,7 @@ def create_record_class(name, packet_size_type):
             # "read the rest" behavior underneath works as expected and doesn't
             # read the rest of the input stream.
             packet_buffer = istream.read(self.packet_size.value)
-            self.packet = Packet.decode(io.BytesIO(packet_buffer))
+            self.packet = Packet.decode(io.BytesIO(packet_buffer), fsw_dict)
 
             return self
 
@@ -383,11 +414,11 @@ class Packet():
         IDLE = 5
         UNKNOWN = 0xFF
 
-    def as_json(self, fprime_dict=None):
-        return as_json_obj_helper(self, ('type', 'payload'), fprime_dict)
+    def as_json(self):
+        return as_json_obj_helper(self, ('type', 'payload'))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         '''
         Decodes an F Prime packet (basically a `Fw::ComPacket`) from the given
         binary input stream.  This decoding process has "read the rest"
@@ -398,17 +429,17 @@ class Packet():
         wrapping that bytes object in a binary input stream using `io.BytesIO`.
         '''
         self = cls()
-        self.type = type(self).Type.decode(istream)
+        self.type = type(self).Type.decode(istream, fsw_dict)
         if self.type == type(self).Type.TELEM:
-            self.payload = TelemPacket.decode(istream)
+            self.payload = TelemPacket.decode(istream, fsw_dict)
         elif self.type == type(self).Type.LOG:
-            self.payload = EventPacket.decode(istream)
+            self.payload = EventPacket.decode(istream, fsw_dict)
         elif self.type == type(self).Type.FILE:
-            self.payload = FilePacket.decode(istream)
+            self.payload = FilePacket.decode(istream, fsw_dict)
         else:
             # NOTE: This is "read the rest" behavior so it is important that
             # the input stream be confined to the extents of the packet itself.
-            self.payload = Buffer.decode(istream)
+            self.payload = Buffer.decode(istream, fsw_dict)
         return self
 
     def encode(self, ostream):
@@ -428,85 +459,135 @@ class Packet():
 @register_fp_types_custom()
 class TelemPacket():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         extended_dict = {}
-        if fprime_dict:
-            channel = fprime_dict.channels_by_id[self.id.value]
-            extended_dict['topology_name'] = f'"{channel.topology_name}"'
-            extended_dict['component'] = f'"{channel.component}"'
-            extended_dict['name'] = f'"{channel.name}"'
+        if not self.channel is None:
+            extended_dict['topology_name'] = f'"{self.channel.topology_name}"'
+            extended_dict['component'] = f'"{self.channel.component}"'
+            extended_dict['name'] = f'"{self.channel.name}"'
+        if not self.value is None:
+            extended_dict['value'] = self.value.as_json()
         return as_json_obj_helper(
             self,
-            ('id', 'time', 'value'),
-            fprime_dict,
+            ('id', 'time', 'value_raw'),
             extended_dict=extended_dict)
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.id = FwChanIdType.decode(istream)
-        self.time = Time.decode(istream)
+        self.id = FwChanIdType.decode(istream, fsw_dict)
+        self.time = Time.decode(istream, fsw_dict)
         # NOTE: This is "read the rest" behavior so it is important that the
         # input stream be confined to the extents of the packet itself.
-        self.value = Buffer.decode(istream)
+        self.value_raw = Buffer.decode(istream, fsw_dict)
+
+        self.channel = None
+        self.value = None
+
+        if fsw_dict:
+            self.channel = fsw_dict.channels_by_id.get(self.id.value, None)
+            if self.channel is None:
+                sys.stderr.write(
+                    f'WARNING: Could not find channel ID "{self.id.value}" '
+                    'in FSW dictionary. This indicates that the '
+                    'dictionary and the input data are not compatible.\n')
+
+        if not self.channel is None and not self.channel.type is None:
+            value_raw_istream = io.BytesIO(self.value_raw.data)
+            self.value = self.channel.type.decode(value_raw_istream, fsw_dict)
+
         return self
 
     def encode(self, ostream):
         assert(type(self.id) == FwChanIdType)
         assert(type(self.time) == Time)
-        assert(type(self.value) == Buffer)
+        assert(type(self.value_raw) == Buffer)
         self.id.encode(ostream)
         self.time.encode(ostream)
-        self.value.encode(ostream)
+        self.value_raw.encode(ostream)
 
 
 @register_fp_types_custom()
 class EventPacket():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         extended_dict = {}
-        if fprime_dict:
-            event = fprime_dict.events_by_id[self.id.value]
-            extended_dict['topology_name'] = f'"{event.topology_name}"'
-            extended_dict['component'] = f'"{event.component}"'
-            extended_dict['name'] = f'"{event.name}"'
-            extended_dict['severity'] = f'"{event.severity_str}"'
+        if not self.event is None:
+            extended_dict['topology_name'] = f'"{self.event.topology_name}"'
+            extended_dict['component'] = f'"{self.event.component}"'
+            extended_dict['name'] = f'"{self.event.name}"'
+            extended_dict['severity'] = f'"{self.event.severity_str}"'
+        if not self.arguments is None:
+            args_as_json = []
+            for arg in self.arguments:
+                if arg is None:
+                    arg_as_json.append('null')
+                    continue
+                args_as_json.append(arg.as_json())
+            extended_dict['arguments'] = "[{}]".format(
+                ', '.join(args_as_json))
         return as_json_obj_helper(
             self,
-            ('id', 'time', 'arguments'),
-            fprime_dict,
+            ('id', 'time', 'arguments_raw'),
             extended_dict=extended_dict)
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.id = FwEventIdType.decode(istream)
-        self.time = Time.decode(istream)
+        self.id = FwEventIdType.decode(istream, fsw_dict)
+        self.time = Time.decode(istream, fsw_dict)
         # NOTE: This is "read the rest" behavior so it is important that the
         # input stream be confined to the extents of the packet itself.
-        self.arguments = Buffer.decode(istream)
+        self.arguments_raw = Buffer.decode(istream, fsw_dict)
+
+        self.event = None
+        self.arguments = None
+
+        if fsw_dict:
+            self.event = fsw_dict.events_by_id.get(
+                self.id.value,
+                None)
+            if self.event is None:
+                sys.stderr.write(
+                    f'WARNING: Could not find event ID "{self.id.value}" '
+                    'in FSW dictionary. This indicates that the '
+                    'dictionary and the input data are not compatible.\n')
+
+        if not self.event is None:
+            arguments_raw_istream = io.BytesIO(self.arguments_raw.data)
+            self.arguments = []
+            for arg in self.event.args:
+                if arg.type is None:
+                    self.arguments.append(None)
+                    continue
+                self.arguments.append(
+                    arg.type.decode(
+                        arguments_raw_istream,
+                        fsw_dict,
+                        length=arg.length))
+
         return self
 
     def encode(self, ostream):
         assert(type(self.id) == FwEventIdType)
         assert(type(self.time) == Time)
-        assert(type(self.arguments) == Buffer)
+        assert(type(self.arguments_raw) == Buffer)
         self.id.encode(ostream)
         self.time.encode(ostream)
-        self.arguments.encode(ostream)
+        self.arguments_raw.encode(ostream)
 
 
 @register_fp_types_custom()
 class FilePacketPathName():
 
-    def as_json(self, fprime_dict=None):
-        return as_json_obj_helper(self, ('length', 'value'), fprime_dict)
+    def as_json(self):
+        return as_json_obj_helper(self, ('length', 'value'))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.length = U8.decode(istream)
-        self.value = AsciiString.decode(istream, self.length)
+        self.length = U8.decode(istream, fsw_dict)
+        self.value = AsciiString.decode(istream, fsw_dict, self.length)
         return self
 
     def encode(self, ostream):
@@ -532,26 +613,23 @@ class FilePacket():
         CANCEL = 3
         NONE = 255
 
-    def as_json(self, fprime_dict=None):
-        return as_json_obj_helper(
-            self,
-            ('type', 'sequence_index', 'payload'),
-            fprime_dict)
+    def as_json(self):
+        return as_json_obj_helper(self, ('type', 'sequence_index', 'payload'))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.type = type(self).Type.decode(istream)
-        self.sequence_index = U32.decode(istream)
+        self.type = type(self).Type.decode(istream, fsw_dict)
+        self.sequence_index = U32.decode(istream, fsw_dict)
 
         if self.type == type(self).Type.START:
-            self.payload = FilePacketStartPayload.decode(istream)
+            self.payload = FilePacketStartPayload.decode(istream, fsw_dict)
         elif self.type == type(self).Type.DATA:
-            self.payload = FilePacketDataPayload.decode(istream)
+            self.payload = FilePacketDataPayload.decode(istream, fsw_dict)
         elif self.type == type(self).Type.END:
-            self.payload = FilePacketEndPayload.decode(istream)
+            self.payload = FilePacketEndPayload.decode(istream, fsw_dict)
         elif self.type == type(self).Type.CANCEL:
-            self.payload = FilePacketCancelPayload.decode(istream)
+            self.payload = FilePacketCancelPayload.decode(istream, fsw_dict)
         else:
             raise KeyError(f'Encountered unknown FilePacket type: {self.type}')
 
@@ -579,18 +657,17 @@ class FilePacket():
 @register_fp_types_custom()
 class FilePacketStartPayload():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         return as_json_obj_helper(
             self,
-            ('file_size', 'source_path', 'destination_path'),
-            fprime_dict)
+            ('file_size', 'source_path', 'destination_path'))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.file_size = U32.decode(istream)
-        self.source_path = FilePacketPathName.decode(istream)
-        self.destination_path = FilePacketPathName.decode(istream)
+        self.file_size = U32.decode(istream, fsw_dict)
+        self.source_path = FilePacketPathName.decode(istream, fsw_dict)
+        self.destination_path = FilePacketPathName.decode(istream, fsw_dict)
         return self
 
     def encode(self, ostream):
@@ -602,18 +679,17 @@ class FilePacketStartPayload():
 @register_fp_types_custom()
 class FilePacketDataPayload():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         return as_json_obj_helper(
             self,
-            ('byte_offset', 'data_size', 'data'),
-            fprime_dict)
+            ('byte_offset', 'data_size', 'data'))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.byte_offset = U32.decode(istream)
-        self.data_size = U16.decode(istream)
-        self.data = Buffer.decode(istream, self.data_size)
+        self.byte_offset = U32.decode(istream, fsw_dict)
+        self.data_size = U16.decode(istream, fsw_dict)
+        self.data = Buffer.decode(istream, fsw_dict, self.data_size)
         return self
 
     def encode(self, ostream):
@@ -628,13 +704,13 @@ class FilePacketDataPayload():
 @register_fp_types_custom()
 class FilePacketEndPayload():
 
-    def as_json(self, fprime_dict=None):
-        return as_json_obj_helper(self, ('checksum'), fprime_dict)
+    def as_json(self):
+        return as_json_obj_helper(self, ('checksum',))
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.checksum = U32.decode(istream)
+        self.checksum = U32.decode(istream, fsw_dict)
         return self
 
     def encode(self, ostream):
@@ -645,11 +721,11 @@ class FilePacketEndPayload():
 @register_fp_types_custom()
 class FilePacketCancelPayload():
 
-    def as_json(self, fprime_dict=None):
+    def as_json(self):
         return '{}'
 
     @classmethod
-    def decode(cls, istream):
+    def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         return self
 
@@ -675,19 +751,13 @@ class FprimeDictionary():
         def __init__(self, elem):
             self.name = elem.get('type')
             self.items = [type(self).Item(x) for x in elem.findall('item')]
-
-        def decode(self, istream):
-            pass
+            self.type = None
 
     class Serializable():
-
-        def decode(self, istream):
-            pass
+        pass
 
     class Array():
-
-        def decode(self, istream):
-            pass
+        pass
 
     class Command():
         pass
@@ -746,7 +816,7 @@ class FprimeDictionary():
     class Parameter():
         pass
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, initial_types):
         self.enums = {}
         self.serializables = {}
         self.arrays = {}
@@ -756,7 +826,7 @@ class FprimeDictionary():
         self.channels = {}
         self.channels_by_id = {}
         self.parameters = {}
-        self.types = {}
+        self.types = copy.copy(initial_types)
 
         from xml.etree import ElementTree
         tree = ElementTree.parse(file_path)
@@ -797,28 +867,56 @@ class FprimeDictionary():
                     if elem.tag == 'parameter':
                         pass
 
+        self.construct_types()
+        self.resolve_types()
+
+    def construct_types(self):
+        for enum_def in self.enums.values():
+            # Apparently F Prime encodes all generated enums as I32.
+            enum_def.type = enum_represented_as(I32)(
+                enum.IntEnum(
+                    enum_def.name,
+                    [(item.name, item.value) for item in enum_def.items]))
+            self.types[enum_def.name] = enum_def.type
+
+    def resolve_types(self):
+        for event in self.events.values():
+            for i, arg in enumerate(event.args):
+                if not arg.type_str in self.types:
+                    sys.stderr.write(
+                        f'WARNING: Could not find type "{arg.type_str}" for '
+                        f'argument "{arg.name}" of event '
+                        f'"{event.topology_name}" in types namespace\n')
+                arg.type = self.types.get(arg.type_str, None)
+        for channel in self.channels.values():
+            if not channel.type_str in self.types:
+                sys.stderr.write(
+                    f'WARNING: Could not find type "{channel.type_str}" for '
+                    f'channel "{channel.topology_name}" in types namespace\n')
+            channel.type = self.types.get(channel.type_str, None)
+
 
 #### Printers ------------------------------------------------------------------
 
 
 class JsonPrinter():
 
-    def __init__(self, fprime_dict=None):
-        self._d = fprime_dict
+    def __init__(self, fsw_dict=None):
+        self._d = fsw_dict
 
     def print_header(self):
         pass
 
     def print_record(self, item):
-        sys.stdout.write(f'{item.as_json(fprime_dict)}\n')
+        sys.stdout.write(f'{item.as_json()}\n')
 
     def print_footer(self):
         pass
 
 class TsvPrinter():
 
-    def __init__(self, fprime_dict=None):
-        self._d = fprime_dict
+    def __init__(self, fsw_dict=None):
+        self._d = fsw_dict
 
     def print_header(self):
         sys.stdout.write(
@@ -834,7 +932,8 @@ class TsvPrinter():
             '\ttelem_component'
             '\ttelem_name'
             '\ttelem_time'
-            '\ttelem_value_size'
+            '\ttelem_value_raw_size'
+            '\ttelem_value_raw'
             '\ttelem_value'
             '\tevent_id'
             '\tevent_id_hex'
@@ -870,14 +969,15 @@ class TsvPrinter():
                 f'\t{getattr(channel, "component", "")}'
                 f'\t{getattr(channel, "name", "")}'
                 f'\t{payload.time}'
-                f'\t{len(payload.value)}'
-                f'\t{payload.value.data.hex() if len(payload.value) else ""}'
+                f'\t{len(payload.value_raw)}'
+                f'\t{payload.value_raw.data.hex() if len(payload.value_raw) else ""}'
+                f'\t{payload.value}'
                 '\t\t\t\t\t\t\t\t\t\t')
         elif record.packet.type == Packet.Type.LOG:
             event = self._d and self._d.events_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
-                '\t\t\t\t\t\t\t\t'
+                '\t\t\t\t\t\t\t\t\t'
                 f'\t{payload.id}'
                 f'\t{payload.id:#x}'
                 f'\t{getattr(event, "topology_name", "")}'
@@ -885,8 +985,8 @@ class TsvPrinter():
                 f'\t{getattr(event, "name", "")}'
                 f'\t{getattr(event, "severity_str", "")}'
                 f'\t{payload.time}'
-                f'\t{len(payload.arguments)}'
-                f'\t{payload.arguments.data.hex() if len(payload.arguments) else ""}'
+                f'\t{len(payload.arguments_raw)}'
+                f'\t{payload.arguments_raw.data.hex() if len(payload.arguments_raw) else ""}'
                 '\t')
         else:
             sys.stdout.write(
@@ -900,8 +1000,8 @@ class TsvPrinter():
 
 class VnlogPrinter():
 
-    def __init__(self, fprime_dict=None):
-        self._d = fprime_dict
+    def __init__(self, fsw_dict=None):
+        self._d = fsw_dict
 
     def print_header(self):
         sys.stdout.write(
@@ -917,7 +1017,8 @@ class VnlogPrinter():
             '\ttelem_component'
             '\ttelem_name'
             '\ttelem_time'
-            '\ttelem_value_size'
+            '\ttelem_value_raw_size'
+            '\ttelem_value_raw'
             '\ttelem_value'
             '\tevent_id'
             '\tevent_id_hex'
@@ -953,14 +1054,15 @@ class VnlogPrinter():
                 f'\t{getattr(channel, "component", "-")}'
                 f'\t{getattr(channel, "name", "-")}'
                 f'\t{payload.time}'
-                f'\t{len(payload.value)}'
-                f'\t{payload.value.data.hex() if len(payload.value) else "-"}'
+                f'\t{len(payload.value_raw)}'
+                f'\t{payload.value_raw.data.hex() if len(payload.value_raw) else "-"}'
+                f'\t{payload.value}'
                 '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-')
         elif record.packet.type == Packet.Type.LOG:
             event = self._d and self._d.events_by_id.get(payload.id.value, None)
             sys.stdout.write(
                 f'\t{payload.time}'
-                '\t-\t-\t-\t-\t-\t-\t-\t-'
+                '\t-\t-\t-\t-\t-\t-\t-\t-\t-'
                 f'\t{payload.id}'
                 f'\t{payload.id:#x}'
                 f'\t{getattr(event, "topology_name", "-")}'
@@ -968,8 +1070,8 @@ class VnlogPrinter():
                 f'\t{getattr(event, "name", "-")}'
                 f'\t{getattr(event, "severity_str", "-")}'
                 f'\t{payload.time}'
-                f'\t{len(payload.arguments)}'
-                f'\t{payload.arguments.data.hex() if len(payload.arguments) else "-"}'
+                f'\t{len(payload.arguments_raw)}'
+                f'\t{payload.arguments_raw.data.hex() if len(payload.arguments_raw) else "-"}'
                 '\t-')
         else:
             sys.stdout.write(
@@ -1083,7 +1185,10 @@ if __name__ == '__main__':
         fp_types[name] = getattr(args, name)
         globals()[name] = getattr(args, name)
 
-    fprime_dict = args.dictionary and FprimeDictionary(args.dictionary)
+    fsw_dict = (
+        args.dictionary
+        and FprimeDictionary(args.dictionary, fp_types)
+    )
 
     record_type = None
     record_type = fp_types.get(args.record_type, record_type)
@@ -1098,11 +1203,11 @@ if __name__ == '__main__':
         args.output_format = 'json'
 
     if args.output_format == 'json':
-        printer = JsonPrinter(fprime_dict)
+        printer = JsonPrinter(fsw_dict)
     elif args.output_format == 'tsv':
-        printer = TsvPrinter(fprime_dict)
+        printer = TsvPrinter(fsw_dict)
     elif args.output_format == 'vnlog':
-        printer = VnlogPrinter(fprime_dict)
+        printer = VnlogPrinter(fsw_dict)
     else:
         raise KeyError(f'Unknown printer specified: "{args.output_format}"')
 
@@ -1111,7 +1216,7 @@ if __name__ == '__main__':
     try:
         record_index = 0
         while True:
-            record = record_type.decode(args.istream)
+            record = record_type.decode(args.istream, fsw_dict)
             printer.print_record(record)
             record_index += 1
     except BrokenPipeError:
