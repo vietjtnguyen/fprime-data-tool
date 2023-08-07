@@ -2,16 +2,17 @@
 import copy
 import enum
 import io
+import json
 import struct
 
 
 def as_json_obj_helper(obj, keys, extended_dict=None):
     attrs = list(
-        f'"{key}": {getattr(obj, key).as_json()}'
+        f'{json.dumps(key)}: {getattr(obj, key).as_json()}'
         for key in keys)
     if extended_dict:
         attrs.extend(
-            f'"{key}": {value}'
+            f'{json.dumps(key)}: {value}'
             for key, value in extended_dict.items())
     return '{' + ', '.join(attrs) + '}'
 
@@ -53,7 +54,7 @@ def enum_represented_as(enum_underlying_type):
         type.encode = encode
 
         def as_json(self):
-            return f'"{self.name}"'
+            return f'{json.dumps(self.name)}'
         type.as_json = as_json
 
         def __str__(self):
@@ -248,7 +249,6 @@ class AsciiString():
         self.string = string
 
     def as_json(self):
-        import json
         return json.dumps(self.string)
 
     @classmethod
@@ -283,6 +283,42 @@ class AsciiString():
         return str(self.string)
 
 
+@register_fp_types('LogArgString')
+@register_fp_types_custom()
+class LogArgString():
+
+    def __init__(self, string=b''):
+        self.string = string
+
+    def as_json(self):
+        return f'{{"length": {self.length}, "string": {json.dumps(self.string)}}}'
+
+    @classmethod
+    def decode(cls, istream, fsw_dict=None, length=None):
+        self = cls()
+        self.length = U16.decode(istream, fsw_dict)
+        self.string = istream.read(self.length.value).decode('ascii')
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.length) is U16)
+        assert(type(self.string) is string)
+        self.length.encode(ostream)
+        ostream.write(self.string.encode('ascii'))
+
+    def __bytes__(self):
+        return bytes(self.string)
+
+    def __len__(self):
+        return len(self.string)
+
+    def __repr__(self):
+        return repr(self.string)
+
+    def __str__(self):
+        return str(self.string)
+
+
 @register_fp_types('Fw::Time')
 @register_fp_types_custom()
 class Time():
@@ -296,22 +332,22 @@ class Time():
             datetime.datetime.fromtimestamp(unix_seconds, local_tzinfo )
         extended_dict = {
             'value': f'{unix_seconds}',
-            'utc_year': f'"{utc_datetime.year}"',
-            'utc_month': f'"{utc_datetime.month}"',
-            'utc_day': f'"{utc_datetime.day}"',
-            'utc_hour': f'"{utc_datetime.hour}"',
-            'utc_minute': f'"{utc_datetime.minute}"',
-            'utc_second': f'"{utc_datetime.second}"',
-            'utc_microsecond': f'"{utc_datetime.microsecond}"',
-            'utc_iso8601': f'"{utc_datetime.isoformat()}"',
-            'local_year': f'"{local_datetime.year}"',
-            'local_month': f'"{local_datetime.month}"',
-            'local_day': f'"{local_datetime.day}"',
-            'local_hour': f'"{local_datetime.hour}"',
-            'local_minute': f'"{local_datetime.minute}"',
-            'local_second': f'"{local_datetime.second}"',
-            'local_microsecond': f'"{local_datetime.microsecond}"',
-            'local_iso8601': f'"{local_datetime.isoformat()}"',
+            'utc_year': f'{json.dumps(utc_datetime.year)}',
+            'utc_month': f'{json.dumps(utc_datetime.month)}',
+            'utc_day': f'{json.dumps(utc_datetime.day)}',
+            'utc_hour': f'{json.dumps(utc_datetime.hour)}',
+            'utc_minute': f'{json.dumps(utc_datetime.minute)}',
+            'utc_second': f'{json.dumps(utc_datetime.second)}',
+            'utc_microsecond': f'{json.dumps(utc_datetime.microsecond)}',
+            'utc_iso8601': f'{json.dumps(utc_datetime.isoformat())}',
+            'local_year': f'{json.dumps(local_datetime.year)}',
+            'local_month': f'{json.dumps(local_datetime.month)}',
+            'local_day': f'{json.dumps(local_datetime.day)}',
+            'local_hour': f'{json.dumps(local_datetime.hour)}',
+            'local_minute': f'{json.dumps(local_datetime.minute)}',
+            'local_second': f'{json.dumps(local_datetime.second)}',
+            'local_microsecond': f'{json.dumps(local_datetime.microsecond)}',
+            'local_iso8601': f'{json.dumps(local_datetime.isoformat())}',
         }
         return as_json_obj_helper(
             self,
@@ -444,7 +480,9 @@ class Packet():
 
     def encode(self, ostream):
         assert(type(self.type) is type(self).Type)
-        if self.type == type(self).Type.TELEM:
+        if self.type == type(self).Type.COMMAND:
+            assert(type(self.payload) is CommandPacket)
+        elif self.type == type(self).Type.TELEM:
             assert(type(self.payload) is TelemPacket)
         elif self.type == type(self).Type.LOG:
             assert(type(self.payload) is EventPacket)
@@ -457,16 +495,102 @@ class Packet():
 
 
 @register_fp_types_custom()
+class CommandPacket():
+
+    def as_json(self):
+        extended_dict = {
+            'opcode_hex': f'{json.dumps(hex(self.opcode.value))}'
+        }
+
+        if not self.command is None:
+            extended_dict['topology_name'] = \
+                f'{json.dumps(self.command.topology_name)}'
+            extended_dict['component'] = f'{json.dumps(self.command.component)}'
+            extended_dict['mnemonic'] = f'{json.dumps(self.command.mnemonic)}'
+
+        if not self.arguments is None:
+            args_as_json = []
+
+            for arg_def, arg in zip(self.command.args, self.arguments):
+                arg_as_json = (
+                    '{'
+                    f'"name": {json.dumps(arg_def.name)}'
+                    f', "type": {json.dumps(arg_def.type_str)}'
+                    f', "value": {"null" if arg is None else arg.as_json()}'
+                    '}'
+                )
+                args_as_json.append(arg_as_json)
+
+            extended_dict['arguments'] = "[{}]".format(
+                ', '.join(args_as_json))
+
+        return as_json_obj_helper(
+            self,
+            ('opcode', 'time', 'arguments_raw'),
+            extended_dict=extended_dict)
+
+    @classmethod
+    def decode(cls, istream, fsw_dict=None, length=None):
+        self = cls()
+        self.opcode = FwOpcodeType.decode(istream, fsw_dict)
+        # NOTE: This is "read the rest" behavior so it is important that the
+        # input stream be confined to the extents of the packet itself.
+        self.arguments_raw = Buffer.decode(istream, fsw_dict)
+
+        self.fsw_dict = fsw_dict
+        self.command = None
+        self.arguments = None
+
+        if self.fsw_dict:
+            self.command = self.fsw_dict.commands_by_opcode.get(
+                self.opcode.value,
+                None)
+            if self.command is None:
+                sys.stderr.write(
+                    'WARNING: Could not find command opcode '
+                    f'"{self.opcode.value}" in FSW dictionary. This indicates '
+                    'that the dictionary and the input data are not '
+                    'compatible.\n')
+
+        if not self.command is None:
+            arguments_raw_istream = io.BytesIO(self.arguments_raw.data)
+            self.arguments = []
+            for arg in self.command.args:
+                if arg.type is None:
+                    self.arguments.append(None)
+                    continue
+                self.arguments.append(
+                    arg.type.decode(
+                        arguments_raw_istream,
+                        self.fsw_dict,
+                        length=arg.length))
+
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.opcode) == FwOpcodeType)
+        assert(type(self.arguments_raw) == Buffer)
+        self.opcode.encode(ostream)
+        self.arguments_raw.encode(ostream)
+
+
+@register_fp_types_custom()
 class TelemPacket():
 
     def as_json(self):
-        extended_dict = {}
+        extended_dict = {
+            'id_hex': f'{json.dumps(hex(self.id.value))}'
+        }
+
         if not self.channel is None:
-            extended_dict['topology_name'] = f'"{self.channel.topology_name}"'
-            extended_dict['component'] = f'"{self.channel.component}"'
-            extended_dict['name'] = f'"{self.channel.name}"'
+            extended_dict['topology_name'] = \
+                f'{json.dumps(self.channel.topology_name)}'
+            extended_dict['component'] = f'{json.dumps(self.channel.component)}'
+            extended_dict['name'] = f'{json.dumps(self.channel.name)}'
+
         if not self.value is None:
             extended_dict['value'] = self.value.as_json()
+
         return as_json_obj_helper(
             self,
             ('id', 'time', 'value_raw'),
@@ -511,21 +635,48 @@ class TelemPacket():
 class EventPacket():
 
     def as_json(self):
-        extended_dict = {}
+        extended_dict = {
+            'id_hex': f'{json.dumps(hex(self.id.value))}'
+        }
+
         if not self.event is None:
-            extended_dict['topology_name'] = f'"{self.event.topology_name}"'
-            extended_dict['component'] = f'"{self.event.component}"'
-            extended_dict['name'] = f'"{self.event.name}"'
-            extended_dict['severity'] = f'"{self.event.severity_str}"'
+            extended_dict['topology_name'] = \
+                f'{json.dumps(self.event.topology_name)}'
+            extended_dict['component'] = f'{json.dumps(self.event.component)}'
+            extended_dict['name'] = f'{json.dumps(self.event.name)}'
+            extended_dict['severity'] = f'{json.dumps(self.event.severity_str)}'
+
         if not self.arguments is None:
             args_as_json = []
-            for arg in self.arguments:
-                if arg is None:
-                    arg_as_json.append('null')
-                    continue
-                args_as_json.append(arg.as_json())
+
+            for arg_def, arg in zip(self.event.args, self.arguments):
+                arg_as_json = (
+                    '{'
+                    f'"name": {json.dumps(arg_def.name)}'
+                    f', "type": {json.dumps(arg_def.type_str)}'
+                    f', "value": {"null" if arg is None else arg.as_json()}'
+                )
+
+                # We try to be helpful and automatically look up opcode event
+                # arguments for events from the command dispatcher.  The
+                # command topology name and opcode in hex format (which is
+                # typically is in the XML) are added to the JSON object for the
+                # argument.
+                if self.event.component == 'cmdDisp' \
+                        and arg_def.name == 'Opcode':
+                    command_topology_name = \
+                        self.fsw_dict.commands_by_opcode[arg.value].topology_name
+                    arg_as_json += \
+                        f', "value_hex": {json.dumps(hex(arg.value))}'
+                    arg_as_json += \
+                        f', "command": {json.dumps(command_topology_name)}'
+
+                arg_as_json += '}'
+                args_as_json.append(arg_as_json)
+
             extended_dict['arguments'] = "[{}]".format(
                 ', '.join(args_as_json))
+
         return as_json_obj_helper(
             self,
             ('id', 'time', 'arguments_raw'),
@@ -540,11 +691,12 @@ class EventPacket():
         # input stream be confined to the extents of the packet itself.
         self.arguments_raw = Buffer.decode(istream, fsw_dict)
 
+        self.fsw_dict = fsw_dict
         self.event = None
         self.arguments = None
 
-        if fsw_dict:
-            self.event = fsw_dict.events_by_id.get(
+        if self.fsw_dict:
+            self.event = self.fsw_dict.events_by_id.get(
                 self.id.value,
                 None)
             if self.event is None:
@@ -563,7 +715,7 @@ class EventPacket():
                 self.arguments.append(
                     arg.type.decode(
                         arguments_raw_istream,
-                        fsw_dict,
+                        self.fsw_dict,
                         length=arg.length))
 
         return self
@@ -760,7 +912,35 @@ class FprimeDictionary():
         pass
 
     class Command():
-        pass
+
+        class Argument():
+
+            def __init__(self, elem):
+                self.name = elem.get('name')
+                self.description = elem.get('description')
+                self.length = int(elem.get('len')) if elem.get('len') else None
+                self.type_str = elem.get('type')
+                self.type = None
+
+        def __init__(self, elem):
+            self.component = elem.get('component')
+            self.mnemonic = elem.get('mnemonic')
+            self.topology_name = f'{self.component}.{self.mnemonic}'
+            self.opcode_str = elem.get('opcode')
+            self.opcode = int(
+                self.opcode_str,
+                base=16 if self.opcode_str.startswith('0x') else 10)
+            self.description = elem.get('description')
+            # For some reason the PRM_SAVE generated commands don't have an
+            # <args> block in the command definition in the dictionary XML so
+            # we have to handle that.  Other commands with no arguments still
+            # at least have an <args/> block.
+            if elem.find('args'):
+                self.args = [
+                    type(self).Argument(x)
+                    for x in elem.find('args').findall('arg')]
+            else:
+                self.args = []
 
     class Event():
 
@@ -821,6 +1001,7 @@ class FprimeDictionary():
         self.serializables = {}
         self.arrays = {}
         self.commands = {}
+        self.commands_by_opcode = {}
         self.events = {}
         self.events_by_id = {}
         self.channels = {}
@@ -848,7 +1029,10 @@ class FprimeDictionary():
             elif collection.tag == 'commands':
                 for elem in collection:
                     if elem.tag == 'command':
-                        pass
+                        command = type(self).Command(elem)
+                        self.commands[(command.component, command.mnemonic)] = \
+                            command
+                        self.commands_by_opcode[command.opcode] = command
             elif collection.tag == 'events':
                 for elem in collection:
                     if elem.tag == 'event':
@@ -878,8 +1062,19 @@ class FprimeDictionary():
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
             self.types[enum_def.name] = enum_def.type
+            # TODO (vnguyen): Serializables
+            # TODO (vnguyen): Arrays
 
     def resolve_types(self):
+        for command in self.commands.values():
+            for i, arg in enumerate(command.args):
+                if not arg.type_str in self.types:
+                    sys.stderr.write(
+                        f'WARNING: Could not find type "{arg.type_str}" for '
+                        f'argument "{arg.name}" of command '
+                        f'"{command.topology_name}" in types namespace\n')
+                arg.type = self.types.get(arg.type_str, None)
+
         for event in self.events.values():
             for i, arg in enumerate(event.args):
                 if not arg.type_str in self.types:
@@ -887,7 +1082,22 @@ class FprimeDictionary():
                         f'WARNING: Could not find type "{arg.type_str}" for '
                         f'argument "{arg.name}" of event '
                         f'"{event.topology_name}" in types namespace\n')
-                arg.type = self.types.get(arg.type_str, None)
+                # In the logs I'm testing with the event argument string
+                # appears to have a U16 length at the front.  This is strange
+                # because based on code reading a length is not added by
+                # default because AMPCS support is off by default.  Even when
+                # AMPCS support is turned on the length is written as a U8.
+                # I'm seeing a 0x00 and then a byte of length.  I'm supporting
+                # the logs I see directly so I've introduced LogArgString which
+                # will decode a U16 length first and then the string data.
+                # When we see a string type in the dictionary for an event
+                # argument type we intercept and instead set it to
+                # LogArgString.
+                if arg.type_str == 'string':
+                    arg.type = self.types.get('LogArgString', None)
+                else:
+                    arg.type = self.types.get(arg.type_str, None)
+
         for channel in self.channels.values():
             if not channel.type_str in self.types:
                 sys.stderr.write(
