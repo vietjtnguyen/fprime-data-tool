@@ -274,7 +274,7 @@ class Buffer():
         return f'"0x{self.data.hex()}"'
 
     @classmethod
-    def decode(cls, istream, fsw_dict=None, length=None):
+    def decode(cls, istream, fsw_dict=None, length=-1):
         '''
         Decodes a buffer object from the binary input stream by simply reading
         the data from the input stream as a bytes object and storing it in the
@@ -315,7 +315,7 @@ class AsciiString():
         return json.dumps(self.string)
 
     @classmethod
-    def decode(cls, istream, fsw_dict=None, length=None):
+    def decode(cls, istream, fsw_dict=None, length=-1):
         '''
         Decodes an ASCII string object from the binary input stream by simply
         reading the string from the input stream as a bytes object, decoding it
@@ -357,7 +357,7 @@ class LogArgString():
         return f'{{"length": {self.length}, "string": {json.dumps(self.string)}}}'
 
     @classmethod
-    def decode(cls, istream, fsw_dict=None, length=None):
+    def decode(cls, istream, fsw_dict=None, length=-1):
         self = cls()
         self.length = U16.decode(istream, fsw_dict)
         self.string = istream.read(self.length.value).decode('ascii')
