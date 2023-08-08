@@ -1236,7 +1236,12 @@ class FprimeDictionary():
                     f'"{array_def.element_type_str}" for '
                     f'array "{array_def.name}" in types namespace\n')
                 continue
-            array_def.type = make_array_type(array_def.name, self.types[array_def.element_type_str], array_def.size)
+            array_def.type = make_array_type(
+                array_def.name,
+                self.types[array_def.element_type_str],
+                array_def.size)
+
+            # Register array type in type namespace
             self.types[array_def.name] = array_def.type
 
     def resolve_types(self):
