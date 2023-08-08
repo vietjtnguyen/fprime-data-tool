@@ -86,7 +86,22 @@ fprime-data-tool \
 | visidata - -b -o recv.csv
 ```
 
+### JSON
+
+For complex payloads where values and arguments are composed of custom arrays or custom serializables the tabular formats cannot capture the complexity easily.  The JSON format, however, can and is very useful for deep inspection of the data, especially when paired with tools like [`jq`](https://jqlang.github.io/jq/).
+
 ## Cookbook
+
+### Print JSON object of time and value for all telemetry for component `navigation` and channel `PosePosition`
+
+```sh
+fprime-data-tool \
+    -F json \
+    -d fsw-dictionary.xml \
+    --record-type FprimeGdsRecord \
+    gds-log2/recv.bin \
+| jq 'select(.packet.payload.topology_name == "navigation.PosePosition") | {"time": .packet.payload.time.value, "value": .packet.payload.value}' -c
+```
 
 ### Count number of times a particular event occurs in a `ComLogger` log
 
@@ -149,8 +164,11 @@ fprime-data-tool \
 - Add Python packaging (i.e. `setup.py`)
 - Support `fprime-gds` protocol input format (with `0xDEADBEEF` sync marker)
 - Support encoding of command packets
+- Support validating commands
 - Support encoding of file packets given a file
 - Support encoding of telemetry packets
 - Support encoding of event packets
 - Support encoding into `fprime-gds` protocol (with `0xDEADBEEF` sync marker)
 - Add [Textual](https://textual.textualize.io/) terminal user interface (TUI) front end
+- Support generating sequence files
+- Support writing parameter files

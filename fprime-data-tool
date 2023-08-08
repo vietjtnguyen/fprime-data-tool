@@ -122,6 +122,44 @@ def make_array_type(name, element_type, size):
     return Array
 
 
+def make_serializable_type(name, member_defs):
+    _member_defs = member_defs
+
+    class Serializable():
+        member_defs = _member_defs
+
+        def as_json(self):
+            return (
+                '{'
+                + ', '.join(
+                    '{}: {}'.format(
+                        json.dumps(member_name),
+                        getattr(self, member_name).as_json())
+                    for member_name, _ in type(self).member_defs)
+                + '}'
+            )
+
+        @classmethod
+        def decode(cls, istream, fsw_dict=None, length=None):
+            self = cls()
+            for member_name, member_type in type(self).member_defs:
+                setattr(
+                    self,
+                    member_name,
+                    member_type.decode(istream, fsw_dict))
+            return self
+
+        def encode(self, ostream):
+            for member_name, member_type in type(self).member_defs:
+                member_value = getattr(self, member_name)
+                assert(type(member_value) is member_type)
+                member_value.encode(ostream)
+
+    Serializable.__name__ = name
+
+    return Serializable
+
+
 #### F Prime configuration flags -----------------------------------------------
 
 
@@ -1034,7 +1072,24 @@ class FprimeDictionary():
             self.type = None
 
     class Serializable():
-        pass
+
+        class Member():
+
+            def __init__(self, elem):
+                self.name = elem.get('name')
+                self.format_specifier = elem.get('format_specifier')
+                self.default_str = elem.get('default')
+                self.length = int(elem.get('len')) if elem.get('len') else None
+                self.type_str = elem.get('type')
+                self.type = None
+
+        def __init__(self, elem):
+            self.type_str = elem.get('type')
+            self.name = self.type_str
+            self.members = [
+                type(self).Member(x)
+                for x in elem.find('members').findall('member')]
+            self.type = None
 
     class Array():
 
@@ -1183,7 +1238,8 @@ class FprimeDictionary():
             elif collection.tag == 'serializables':
                 for elem in collection:
                     if elem.tag == 'serializable':
-                        pass
+                        serializable = type(self).Serializable(elem)
+                        self.serializables[serializable.name] = serializable
             elif collection.tag == 'arrays':
                 for elem in collection:
                     if elem.tag == 'array':
@@ -1227,8 +1283,42 @@ class FprimeDictionary():
                 enum.IntEnum(
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
+
+            # Register enum type in type namespace
             self.types[enum_def.name] = enum_def.type
-        # TODO (vnguyen): Serializables
+
+        for serializable_def in self.serializables.values():
+            # Look up types for each member of the serializable
+            for member in serializable_def.members:
+                if not member.type_str in self.types:
+                    sys.stderr.write(
+                        'WARNING: Could not find type '
+                        f'"{member.type_str}" for serializable '
+                        f'"{serializable_def.name}" in types namespace\n')
+                    continue
+
+                if member.type_str == 'string':
+                    member.type = self.types['LogArgString']
+                else:
+                    member.type = self.types[member.type_str]
+
+            if any(member.type is None for member in serializable_def.members):
+                sys.stderr.write(
+                    'WARNING: Not all types for serializable '
+                    f'"{serializable_def.name}" could be found\n')
+                continue
+
+            # Create actual serializable type
+            serializable_def.type = make_serializable_type(
+                serializable_def.name,
+                [
+                    (member.name, member.type)
+                    for member in serializable_def.members
+                ])
+
+            # Register serializable type in type namespace
+            self.types[serializable_def.name] = serializable_def.type
+
         for array_def in self.arrays.values():
             if not array_def.element_type_str in self.types:
                 sys.stderr.write(
