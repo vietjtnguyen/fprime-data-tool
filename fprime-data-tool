@@ -655,7 +655,15 @@ class Packet():
         wrapping that bytes object in a binary input stream using `io.BytesIO`.
         '''
         self = cls()
-        self.type = type(self).Type.decode(istream, fsw_dict)
+        try:
+            self.type = type(self).Type.decode(istream, fsw_dict)
+        except ValueError:
+            # TODO (vnguyen): This works but loses what the original type was.
+            sys.stderr.write(
+                'WARNING: F Prime packet parsed with unknown type. Forging on '
+                'anyway.\n')
+            self.type = type(self).Type.UNKNOWN
+
         if self.type == type(self).Type.COMMAND:
             self.payload = CommandPacket.decode(istream, fsw_dict)
         elif self.type == type(self).Type.TELEM:
