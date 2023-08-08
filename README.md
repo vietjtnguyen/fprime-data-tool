@@ -159,6 +159,110 @@ fprime-data-tool \
 | jq 'select(.component == "globalPlanner")'
 ```
 
+### Parse the uplink stream from `fprime-gds`
+
+First run your `fprime-gds` instance, taking note of what your `--ip-address` and `--ip-port` are.
+
+```sh
+fprime-gds --dictionary fprime-data-tool/fsw-dictionary.xml --no-app --ip-address 0.0.0.0 --ip-port 50000
+```
+
+Now use netcat (`nc`) to connect to the `fprime-gds` server and pipe the received uplink stream to `fprime-data-tool` for parsing and logging. The first tee will save a binary log. The second tee will save the unformatted JSON. The `jq` at the end is just for pretty printing.
+
+```sh
+nc localhost 50000 \
+| stdbuf -o0 tee sent.bin \
+| fprime-data-tool \
+    -R FprimeGdsStream \
+    -d fsw-dictionary.xml \
+    -F json
+| tee sent.json \
+| jq .
+```
+
+Example output:
+
+```
+{
+  "packet_size": 22,
+  "packet": {
+    "type": "COMMAND",
+    "payload": {
+      "opcode": 1281,
+      "arguments_raw": "0x000c68656c6c6f20776f726c6421",
+      "opcode_hex": "0x501",
+      "topology_name": "cmdDisp.CMD_NO_OP_STRING",
+      "component": "cmdDisp",
+      "mnemonic": "CMD_NO_OP_STRING",
+      "arguments": [
+        {
+          "name": "arg1",
+          "type": "string",
+          "value": {
+            "length": 12,
+            "string": "hello world!"
+          }
+        }
+      ]
+    }
+  },
+  "offset": null
+}
+{
+  "packet_size": 54,
+  "packet": {
+    "type": "FILE",
+    "payload": {
+      "type": "START",
+      "sequence_index": 0,
+      "payload": {
+        "file_size": 12,
+        "source_path": {
+          "length": 28,
+          "value": "/tmp/fprime-uplink/hello.txt"
+        },
+        "destination_path": {
+          "length": 11,
+          "value": "./hello.txt"
+        }
+      }
+    }
+  },
+  "offset": null
+}
+{
+  "packet_size": 27,
+  "packet": {
+    "type": "FILE",
+    "payload": {
+      "type": "DATA",
+      "sequence_index": 1,
+      "payload": {
+        "byte_offset": 0,
+        "data_size": 12,
+        "data": "0x68656c6c6f20776f726c640a",
+        "data_str": "b'hello world\\n'"
+      }
+    }
+  },
+  "offset": null
+}
+{
+  "packet_size": 13,
+  "packet": {
+    "type": "FILE",
+    "payload": {
+      "type": "END",
+      "sequence_index": 2,
+      "payload": {
+        "checksum": 1240614885
+      }
+    }
+  },
+  "offset": null
+}
+```
+
 ## Future Work
 
 - Add Python packaging (i.e. `setup.py`)
