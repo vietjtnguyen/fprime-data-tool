@@ -342,9 +342,9 @@ class Buffer():
         return str(self.data)
 
 
-@register_fp_types('string')
+@register_fp_types('AsciiBuffer')
 @register_fp_types_custom()
-class AsciiString():
+class AsciiBuffer():
 
     def __init__(self, string=b''):
         self.string = string
@@ -355,13 +355,14 @@ class AsciiString():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=-1):
         '''
-        Decodes an ASCII string object from the binary input stream by simply
+        Decodes an ASCII buffer object from the binary input stream by simply
         reading the string from the input stream as a bytes object, decoding it
         as an ASCII string, and storing it in the `string` member.  If `length`
         is not specified then all of the remaining bytes in the binary input
-        stream are read into the AsciiString object.  This is "read the rest"
+        stream are read into the AsciiBuffer object.  This is "read the rest"
         behavior.  If length is specified then only that many bytes are read
-        from the input stream.
+        from the input stream.  Note that no length information is decoded from
+        the input stream!
         '''
         self = cls()
         self.string_raw = istream.read(length)
@@ -369,6 +370,9 @@ class AsciiString():
         return self
 
     def encode(self, ostream):
+        '''
+        Writes the buffer to the output stream WITHOUT any length information.
+        '''
         assert(type(self.string) is string)
         ostream.write(self.string.encode('ascii'))
 
@@ -385,9 +389,13 @@ class AsciiString():
         return str(self.string)
 
 
-@register_fp_types('LogArgString')
+@register_fp_types('string')
 @register_fp_types_custom()
-class LogArgString():
+class String():
+    '''
+    Represents a string as a U16 length and a buffer of that length of ASCII
+    characters.
+    '''
 
     def __init__(self, string=b''):
         self.string = string
@@ -905,12 +913,12 @@ class FilePacketPathName():
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         self.length = U8.decode(istream, fsw_dict)
-        self.value = AsciiString.decode(istream, fsw_dict, self.length)
+        self.value = AsciiBuffer.decode(istream, fsw_dict, self.length)
         return self
 
     def encode(self, ostream):
         assert(type(self.length) == U8)
-        assert(type(self.value) == AsciiString)
+        assert(type(self.value) == AsciiBuffer)
         assert(len(self.value) == self.length)
         self.length.encode(ostream)
         self.value.encode(ostream)
@@ -1296,11 +1304,7 @@ class FprimeDictionary():
                         f'"{member.type_str}" for serializable '
                         f'"{serializable_def.name}" in types namespace\n')
                     continue
-
-                if member.type_str == 'string':
-                    member.type = self.types['LogArgString']
-                else:
-                    member.type = self.types[member.type_str]
+                member.type = self.types[member.type_str]
 
             if any(member.type is None for member in serializable_def.members):
                 sys.stderr.write(
@@ -1353,21 +1357,7 @@ class FprimeDictionary():
                         f'argument "{arg.name}" of event '
                         f'"{event.topology_name}" in types namespace\n')
                     continue
-                # In the logs I'm testing with the event argument string
-                # appears to have a U16 length at the front.  This is strange
-                # because based on code reading a length is not added by
-                # default because AMPCS support is off by default.  Even when
-                # AMPCS support is turned on the length is written as a U8.
-                # I'm seeing a 0x00 and then a byte of length.  I'm supporting
-                # the logs I see directly so I've introduced LogArgString which
-                # will decode a U16 length first and then the string data.
-                # When we see a string type in the dictionary for an event
-                # argument type we intercept and instead set it to
-                # LogArgString.
-                if arg.type_str == 'string':
-                    arg.type = self.types['LogArgString']
-                else:
-                    arg.type = self.types[arg.type_str]
+                arg.type = self.types[arg.type_str]
 
         for channel in self.channels.values():
             if not channel.type_str in self.types:
