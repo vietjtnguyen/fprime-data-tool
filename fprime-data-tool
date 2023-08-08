@@ -1728,6 +1728,8 @@ if __name__ == '__main__':
         record_index = 0
         while True:
             record = record_type.decode(args.istream, fsw_dict)
+            if record is None:
+                continue
             printer.print_record(record)
             sys.stdout.flush()
             record_index += 1
