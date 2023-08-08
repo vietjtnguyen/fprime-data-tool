@@ -548,6 +548,22 @@ def create_record_class(name, packet_size_type):
 ComLoggerRecord = create_record_class("ComLoggerRecord", U16)
 FprimeGdsRecord = create_record_class("FprimeGdsRecord", U32)
 
+@register_fp_types_custom()
+class FprimeGdsStream():
+
+    sync_word = bytes.fromhex('deadbeef')
+
+    @classmethod
+    def decode(cls, istream, fsw_dict=None, length=None):
+        for index, byte in enumerate(cls.sync_word):
+            buf = istream.read(1)
+            if len(buf) == 0:
+                raise EndOfInputStream()
+            read_byte = buf[0]
+            if read_byte != byte:
+                return None
+        return FprimeGdsRecord.decode(istream, fsw_dict)
+
 
 @register_fp_types_custom()
 class PrmDbRecord():
@@ -1697,12 +1713,6 @@ if __name__ == '__main__':
         sys.stderr.write(
             f'ERROR: Record type "{record_type.__name__}" does not have a '
             'decode attribute.  The type must have a decode class function.\n')
-        sys.exit(1)
-
-    if not hasattr(record_type, 'as_json'):
-        sys.stderr.write(
-            f'ERROR: Record type "{record_type.__name__}" does not have a '
-            'as_json attribute.  The type must have an as_json() method.\n')
         sys.exit(1)
 
     if record_type is not ComLoggerRecord and \

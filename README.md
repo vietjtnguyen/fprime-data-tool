@@ -162,7 +162,6 @@ fprime-data-tool \
 ## Future Work
 
 - Add Python packaging (i.e. `setup.py`)
-- Support `fprime-gds` protocol input format (with `0xDEADBEEF` sync marker)
 - Support encoding of command packets
 - Support validating commands
 - Support encoding of file packets given a file
