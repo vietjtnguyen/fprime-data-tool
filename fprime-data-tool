@@ -141,6 +141,11 @@ for name, value in fprime_configurable_flags:
 #### Fundamental types ---------------------------------------------------------
 
 
+# This exception is raised when reading a fundamental type on the istream fails
+# indicating that the input stream has ended.
+class EndOfInputStream(BaseException):
+    pass
+
 # Creates a class representing the fundamental type given the name and struct
 # format.
 def make_fundamental_type(name, struct_format):
@@ -154,6 +159,8 @@ def make_fundamental_type(name, struct_format):
         @classmethod
         def decode(cls, istream, fsw_dict=None, length=None):
             data = istream.read(fundamental_struct.size)
+            if len(data) == 0:
+                raise EndOfInputStream()
             return cls(fundamental_struct.unpack(data)[0])
 
         def encode(self, ostream):
@@ -1517,6 +1524,8 @@ if __name__ == '__main__':
             record = record_type.decode(args.istream, fsw_dict)
             printer.print_record(record)
             record_index += 1
+    except EndOfInputStream:
+        pass
     except BrokenPipeError:
         pass
 
