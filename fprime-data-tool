@@ -640,7 +640,9 @@ class Packet():
         '''
         self = cls()
         self.type = type(self).Type.decode(istream, fsw_dict)
-        if self.type == type(self).Type.TELEM:
+        if self.type == type(self).Type.COMMAND:
+            self.payload = CommandPacket.decode(istream, fsw_dict)
+        elif self.type == type(self).Type.TELEM:
             self.payload = TelemPacket.decode(istream, fsw_dict)
         elif self.type == type(self).Type.LOG:
             self.payload = EventPacket.decode(istream, fsw_dict)
