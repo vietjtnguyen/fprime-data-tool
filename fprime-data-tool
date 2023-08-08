@@ -326,7 +326,8 @@ class AsciiString():
         from the input stream.
         '''
         self = cls()
-        self.string = istream.read(length).decode('ascii')
+        self.string_raw = istream.read(length)
+        self.string = self.string_raw.decode('ascii')
         return self
 
     def encode(self, ostream):
@@ -365,7 +366,8 @@ class LogArgString():
     def decode(cls, istream, fsw_dict=None, length=-1):
         self = cls()
         self.length = U16.decode(istream, fsw_dict)
-        self.string = istream.read(self.length.value).decode('ascii')
+        self.string_raw = istream.read(self.length.value)
+        self.string = self.string_raw.decode('ascii')
         return self
 
     def encode(self, ostream):
