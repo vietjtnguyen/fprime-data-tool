@@ -354,7 +354,12 @@ class LogArgString():
         self.string = string
 
     def as_json(self):
-        return f'{{"length": {self.length}, "string": {json.dumps(self.string)}}}'
+        return (
+            '{'
+            f'"length": {self.length}'
+            f', "string": {json.dumps(self.string)}'
+            '}'
+        )
 
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=-1):
