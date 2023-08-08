@@ -1605,6 +1605,23 @@ if __name__ == '__main__':
     record_type = fp_types.get(args.record_type, record_type)
     record_type = fp_types_custom.get(args.record_type, record_type)
 
+    if record_type is None:
+        sys.stderr.write(
+            f'ERROR: Record type "{args.record_type}" does not exist\n')
+        sys.exit(1)
+
+    if not hasattr(record_type, 'decode'):
+        sys.stderr.write(
+            f'ERROR: Record type "{record_type.__name__}" does not have a '
+            'decode attribute.  The type must have a decode class function.\n')
+        sys.exit(1)
+
+    if not hasattr(record_type, 'as_json'):
+        sys.stderr.write(
+            f'ERROR: Record type "{record_type.__name__}" does not have a '
+            'as_json attribute.  The type must have an as_json() method.\n')
+        sys.exit(1)
+
     if record_type is not ComLoggerRecord and \
             record_type is not FprimeGdsRecord:
         sys.stderr.write(
