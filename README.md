@@ -52,6 +52,8 @@ Set `--record-type` to `ComLoggerRecord` to read `ComLogger` logs.
 
 Set `--record-type` to `FprimeGdsRecord` to read `fprime-gds` `recv.bin` logs.
 
+Set `--record-type` to `PrmDbRecord` to read [`PrmDb.dat` files](https://github.com/nasa/fprime/tree/devel/Svc/PrmDb).
+
 ## Output Formats
 
 ### vnlog
@@ -131,11 +133,20 @@ fprime-data-tool \
 | jq 'select(.packet.type == "TELEM") | select(.packet.payload.component == "fpga") | .packet.payload.time.utc_iso8601'
 ```
 
+### Print parameters for `globalPlanner` component in a `PrmDb.dat` file as JSON
+
+```sh
+fprime-data-tool \
+    -d fsw-dictionary.xml \
+    --record-type PrmDbRecord \
+    -F json \
+    PrmDb.dat \
+| jq 'select(.component == "globalPlanner")'
+```
+
 ## Future Work
 
 - Add Python packaging (i.e. `setup.py`)
-- Support decoding of telemetry values
-- Support decoding of event arguments
 - Support `fprime-gds` protocol input format (with `0xDEADBEEF` sync marker)
 - Support encoding of command packets
 - Support encoding of file packets given a file
