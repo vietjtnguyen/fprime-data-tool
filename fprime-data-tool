@@ -915,7 +915,7 @@ class FilePacketPathName():
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         self.length = U8.decode(istream, fsw_dict)
-        self.value = AsciiBuffer.decode(istream, fsw_dict, self.length)
+        self.value = AsciiBuffer.decode(istream, fsw_dict, self.length.value)
         return self
 
     def encode(self, ostream):
@@ -1010,14 +1010,15 @@ class FilePacketDataPayload():
     def as_json(self):
         return as_json_obj_helper(
             self,
-            ('byte_offset', 'data_size', 'data'))
+            ('byte_offset', 'data_size', 'data'),
+            {'data_str': json.dumps(str(self.data.data))})
 
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         self.byte_offset = U32.decode(istream, fsw_dict)
         self.data_size = U16.decode(istream, fsw_dict)
-        self.data = Buffer.decode(istream, fsw_dict, self.data_size)
+        self.data = Buffer.decode(istream, fsw_dict, self.data_size.value)
         return self
 
     def encode(self, ostream):
