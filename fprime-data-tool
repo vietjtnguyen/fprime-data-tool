@@ -702,7 +702,7 @@ class CommandPacket():
 
         return as_json_obj_helper(
             self,
-            ('opcode', 'time', 'arguments_raw'),
+            ('opcode', 'arguments_raw'),
             extended_dict=extended_dict)
 
     @classmethod
