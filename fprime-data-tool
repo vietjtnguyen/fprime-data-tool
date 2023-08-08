@@ -513,13 +513,13 @@ def create_record_class(name, packet_size_type):
                 self,
                 ('packet_size', 'packet'),
                 extended_dict={
-                    "offset": str(self.offset)
+                    "offset": json.dumps(self.offset)
                 })
 
         @classmethod
         def decode(cls, istream, fsw_dict=None, length=None):
             self = cls()
-            self.offset = istream.tell()
+            self.offset = istream.tell() if istream.seekable() else None
             self.packet_size = PacketSizeType.decode(istream, fsw_dict)
 
             # We slice off the input stream into a buffer and create a new
@@ -555,7 +555,7 @@ class PrmDbRecord():
     def as_json(self):
         extended_dict = {
             'id_hex': f'{json.dumps(hex(self.id.value))}',
-            "offset": str(self.offset)
+            "offset": json.dumps(self.offset)
         }
 
         if not self.parameter is None:
@@ -578,7 +578,7 @@ class PrmDbRecord():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.offset = istream.tell()
+        self.offset = istream.tell() if istream.seekable() else None
         self.sync_marker = U8.decode(istream, fsw_dict)
         assert(self.sync_marker.value == 0xa5)
         self.size = U32.decode(istream, fsw_dict)
