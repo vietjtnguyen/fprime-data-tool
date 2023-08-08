@@ -496,6 +496,64 @@ ComLoggerRecord = create_record_class("ComLoggerRecord", U16)
 FprimeGdsRecord = create_record_class("FprimeGdsRecord", U32)
 
 
+@register_fp_types_custom()
+class PrmDbRecord():
+
+    def as_json(self):
+        extended_dict = {
+            'id_hex': f'{json.dumps(hex(self.id.value))}',
+            "offset": str(self.offset)
+        }
+
+        if not self.parameter is None:
+            extended_dict['topology_name'] = \
+                f'{json.dumps(self.parameter.topology_name)}'
+            extended_dict['component'] = \
+                f'{json.dumps(self.parameter.component)}'
+            extended_dict['type'] = \
+                f'{json.dumps(self.parameter.type_str)}'
+            extended_dict['name'] = f'{json.dumps(self.parameter.name)}'
+
+        if not self.value is None:
+            extended_dict['value'] = self.value.as_json()
+
+        return as_json_obj_helper(
+            self,
+            ('sync_marker', 'size', 'id', 'value_raw'),
+            extended_dict)
+
+    @classmethod
+    def decode(cls, istream, fsw_dict=None, length=None):
+        self = cls()
+        self.offset = istream.tell()
+        self.sync_marker = U8.decode(istream, fsw_dict)
+        assert(self.sync_marker.value == 0xa5)
+        self.size = U32.decode(istream, fsw_dict)
+        self.id = FwPrmIdType.decode(istream, fsw_dict)
+        self.value_raw = Buffer.decode(istream, fsw_dict, self.size.value - 4)
+
+        self.parameter = None
+        self.value = None
+
+        if fsw_dict:
+            self.parameter = fsw_dict.parameters_by_id.get(self.id.value, None)
+            if self.parameter is None:
+                sys.stderr.write(
+                    f'WARNING: Could not find parameter ID "{self.id.value}" '
+                    'in FSW dictionary. This indicates that the '
+                    'dictionary and the input data are not compatible.\n')
+
+        if not self.parameter is None and not self.parameter.type is None:
+            value_raw_istream = io.BytesIO(self.value_raw.data)
+            self.value = self.parameter.type.decode(value_raw_istream, fsw_dict)
+
+        return self
+
+    def encode(self, ostream):
+        assert(type(self.type) is type(self).Type)
+        self.type.encode(ostream)
+
+
 #### F Prime packet types ------------------------------------------------------
 
 
@@ -1077,7 +1135,20 @@ class FprimeDictionary():
             self.type = None
 
     class Parameter():
-        pass
+
+        def __init__(self, elem):
+            self.component = elem.get('component')
+            self.name = elem.get('name')
+            self.topology_name = f'{self.component}.{self.name}'
+            self.id_str = elem.get('id')
+            self.id = int(
+                self.id_str,
+                base=16 if self.id_str.startswith('0x') else 10)
+            self.default_str = elem.get('default')
+
+            self.set_command_id = (self.component, f'{self.name}_PRM_SET')
+            self.type_str = None
+            self.type = None
 
     def __init__(self, file_path, initial_types):
         self.enums = {}
@@ -1090,6 +1161,7 @@ class FprimeDictionary():
         self.channels = {}
         self.channels_by_id = {}
         self.parameters = {}
+        self.parameters_by_id = {}
         self.types = copy.copy(initial_types)
 
         from xml.etree import ElementTree
@@ -1133,7 +1205,10 @@ class FprimeDictionary():
             elif collection.tag == 'parameters':
                 for elem in collection:
                     if elem.tag == 'parameter':
-                        pass
+                        parameter = type(self).Parameter(elem)
+                        self.parameters[(parameter.component, parameter.name)] = \
+                            parameter
+                        self.parameters_by_id[parameter.id] = parameter
 
         self.construct_types()
         self.resolve_types()
@@ -1199,6 +1274,24 @@ class FprimeDictionary():
                     f'channel "{channel.topology_name}" in types namespace\n')
                 continue
             channel.type = self.types[channel.type_str]
+
+        for parameter in self.parameters.values():
+            set_command = self.commands.get(parameter.set_command_id, None)
+            if set_command is None:
+                sys.stderr.write(
+                    'WARNING: Could not find command "'
+                    f'{parameter.set_command_id[0]}.'
+                    f'{parameter.set_command_id[1]}" for parameter '
+                    f'"{parameter.topology_name}"\n')
+                continue
+            if len(set_command.args) != 1:
+                sys.stderr.write(
+                    f'WARNING: Command "{set_command.topology_name}" has '
+                    f'{len(set_command.args)} argument when it should have '
+                    'exactly 1\n')
+                continue
+            parameter.type_str = set_command.args[0].type_str
+            parameter.type = set_command.args[0].type
 
 
 #### Printers ------------------------------------------------------------------
@@ -1434,13 +1527,14 @@ if __name__ == '__main__':
         help='''
             specifies the top-level type to parse; the parser will treat the
             input as a concatenated sequence of the specified type; for
-            ComLogger logs use \'ComLoggerRecord\'; for fprime-gds recv.bin
-            logs use \'FprimeGdsRecord\'; default is \'ComLoggerRecord\';
-            typical choices are \'ComLoggerRecord\' and \'FprimeGdsRecord\' but
-            can be any type defined with a decode class function; however if
-            you choose a type other than \'ComLoggerRecord\' and
-            \'FprimeGdsRecord\' then the output format will revert to JSON;
-            types available: {}; '''.format(
+            ComLogger logs use 'ComLoggerRecord'; for fprime-gds recv.bin logs
+            use 'FprimeGdsRecord'; parameter database files use 'PrmDbRecord';
+            default is 'ComLoggerRecord'; typical choices are
+            'ComLoggerRecord', 'FprimeGdsRecord', and 'PrmDbRecord' but can be
+            any type defined with a decode class function; however if you
+            choose a type other than 'ComLoggerRecord' and 'FprimeGdsRecord'
+            then the output format will revert to JSON; types available: {};
+            '''.format(
                 ', '.join(
                     f"'{name}'"
                     for name
