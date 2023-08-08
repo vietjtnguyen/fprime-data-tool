@@ -1729,6 +1729,7 @@ if __name__ == '__main__':
         while True:
             record = record_type.decode(args.istream, fsw_dict)
             printer.print_record(record)
+            sys.stdout.flush()
             record_index += 1
     except EndOfInputStream:
         pass
