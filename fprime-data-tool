@@ -1521,7 +1521,7 @@ if __name__ == '__main__':
             default is to use no dictionary and display packet contents as
             binary blobs''')
     parser.add_argument(
-        '--record-type',
+        '-R', '--record-type',
         type=str,
         default='ComLoggerRecord',
         help='''
