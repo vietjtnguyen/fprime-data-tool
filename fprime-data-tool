@@ -1709,7 +1709,7 @@ if __name__ == '__main__':
     )
 
     record_type = None
-    record_type = fp_types.get(args.record_type, record_type)
+    record_type = fsw_dict.types.get(args.record_type, record_type)
     record_type = fp_types_custom.get(args.record_type, record_type)
 
     if record_type is None:
