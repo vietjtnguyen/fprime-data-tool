@@ -1647,7 +1647,7 @@ if __name__ == '__main__':
         type=argparse.FileType('rb'),
         default=sys.stdin.buffer,
         help='''
-            input ComLogger file (default: read from stdin)''')
+            input file (default: read from stdin)''')
     parser.add_argument(
         '-F', '--output-format',
         action='store',
