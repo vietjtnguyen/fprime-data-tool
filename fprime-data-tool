@@ -1313,10 +1313,18 @@ class FswDictionary():
         # to take care of potential type dependency problems (i.e. type being
         # constructed requires a type that will be constructed later). Memoized
         # depth first traversal should be in topological order.
-        self.construct_types()
+        self.construct_types(fsw_dict_file_path)
         self.resolve_types()
 
-    def construct_types(self):
+    def register_type(self, fsw_dict_file_path, type_name, type):
+        if type_name in self.types:
+            sys.stderr.write(
+                f'WARNING: Type named "{type_name}" already exists in type '
+                'namespace and is being replaced by type in FSW dictionary '
+                f'"{fsw_dict_file_path}".\n')
+        self.types[type_name] = type
+
+    def construct_types(self, fsw_dict_file_path):
         for enum_def in self.enums.values():
             if not enum_def.type is None:
                 continue
@@ -1327,8 +1335,7 @@ class FswDictionary():
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
 
-            # Register enum type in type namespace
-            self.types[enum_def.name] = enum_def.type
+            self.register_type(fsw_dict_file_path, enum_def.name, enum_def.type)
 
         for serializable_def in self.serializables.values():
             if not serializable_def.type is None:
@@ -1358,8 +1365,10 @@ class FswDictionary():
                     for member in serializable_def.members
                 ])
 
-            # Register serializable type in type namespace
-            self.types[serializable_def.name] = serializable_def.type
+            self.register_type(
+                fsw_dict_file_path,
+                serializable_def.name,
+                serializable_def.type)
 
         for array_def in self.arrays.values():
             if not array_def.type is None:
@@ -1377,8 +1386,10 @@ class FswDictionary():
                 self.types[array_def.element_type_str],
                 array_def.size)
 
-            # Register array type in type namespace
-            self.types[array_def.name] = array_def.type
+            self.register_type(
+                fsw_dict_file_path,
+                array_def.name,
+                array_def.type)
 
     def resolve_types(self):
         for command in self.commands.values():
