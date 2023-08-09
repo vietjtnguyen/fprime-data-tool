@@ -1089,7 +1089,7 @@ class FilePacketCancelPayload():
 #### Dictionary ----------------------------------------------------------------
 
 
-class FprimeDictionary():
+class FswDictionary():
 
     class Enum():
 
@@ -1247,7 +1247,7 @@ class FprimeDictionary():
             self.type_str = None
             self.type = None
 
-    def __init__(self, file_path, initial_types):
+    def __init__(self, initial_types=None):
         self.enums = {}
         self.serializables = {}
         self.arrays = {}
@@ -1259,10 +1259,11 @@ class FprimeDictionary():
         self.channels_by_id = {}
         self.parameters = {}
         self.parameters_by_id = {}
-        self.types = copy.copy(initial_types)
+        self.types = copy.copy(initial_types) if initial_types else {}
 
+    def parse(self, fsw_dict_file_path):
         from xml.etree import ElementTree
-        tree = ElementTree.parse(file_path)
+        tree = ElementTree.parse(fsw_dict_file_path)
         root = tree.getroot()
         for collection in root:
             if collection.tag == 'enums':
@@ -1304,15 +1305,22 @@ class FprimeDictionary():
                 for elem in collection:
                     if elem.tag == 'parameter':
                         parameter = type(self).Parameter(elem)
-                        self.parameters[(parameter.component, parameter.name)] = \
-                            parameter
+                        parameter_key = (parameter.component, parameter.name)
+                        self.parameters[parameter_key] = parameter
                         self.parameters_by_id[parameter.id] = parameter
 
+        # TODO (vnguyen): Construct and resolve in a recursive descent manner
+        # to take care of potential type dependency problems (i.e. type being
+        # constructed requires a type that will be constructed later). Memoized
+        # depth first traversal should be in topological order.
         self.construct_types()
         self.resolve_types()
 
     def construct_types(self):
         for enum_def in self.enums.values():
+            if not enum_def.type is None:
+                continue
+
             # Apparently F Prime encodes all generated enums as I32.
             enum_def.type = enum_represented_as(I32)(
                 enum.IntEnum(
@@ -1323,6 +1331,9 @@ class FprimeDictionary():
             self.types[enum_def.name] = enum_def.type
 
         for serializable_def in self.serializables.values():
+            if not serializable_def.type is None:
+                continue
+
             # Look up types for each member of the serializable
             for member in serializable_def.members:
                 if not member.type_str in self.types:
@@ -1351,12 +1362,16 @@ class FprimeDictionary():
             self.types[serializable_def.name] = serializable_def.type
 
         for array_def in self.arrays.values():
+            if not array_def.type is None:
+                continue
+
             if not array_def.element_type_str in self.types:
                 sys.stderr.write(
                     'WARNING: Could not find type '
                     f'"{array_def.element_type_str}" for '
                     f'array "{array_def.name}" in types namespace\n')
                 continue
+
             array_def.type = make_array_type(
                 array_def.name,
                 self.types[array_def.element_type_str],
@@ -1633,12 +1648,15 @@ if __name__ == '__main__':
     parser.add_argument(
         '-d', '--dictionary',
         type=pathlib.Path,
+        nargs=1,
+        action='append',
         default=None,
         required=False,
         help='''
             path to F Prime dictionary used to interpret packet contents;
             default is to use no dictionary and display packet contents as
-            binary blobs''')
+            binary blobs; this flag can be specified multiple times to load and
+            merge multiple dictionaries''')
     parser.add_argument(
         '-R', '--record-type',
         type=str,
@@ -1703,13 +1721,15 @@ if __name__ == '__main__':
         fp_types[name] = getattr(args, name)
         globals()[name] = getattr(args, name)
 
-    fsw_dict = (
-        args.dictionary
-        and FprimeDictionary(args.dictionary, fp_types)
-    )
+    fsw_dict = None
+    if not args.dictionary is None:
+        fsw_dict = FswDictionary(fp_types)
+        for (fsw_dict_file_path,) in args.dictionary:
+            fsw_dict.parse(fsw_dict_file_path)
 
     record_type = None
-    record_type = fsw_dict.types.get(args.record_type, record_type)
+    if not fsw_dict is None:
+        record_type = fsw_dict.types.get(args.record_type, record_type)
     record_type = fp_types_custom.get(args.record_type, record_type)
 
     if record_type is None:
