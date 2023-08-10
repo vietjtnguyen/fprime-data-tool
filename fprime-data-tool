@@ -557,16 +557,44 @@ class FprimeGdsStream():
 
     sync_word = bytes.fromhex('deadbeef')
 
+    def __init__(self):
+        self.record = None
+
+    def as_json(self):
+        if self.record is None:
+            return '{}'
+        assert(isinstance(self.record, FprimeGdsRecord))
+        return self.record.as_json()
+
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
-        for index, byte in enumerate(cls.sync_word):
-            buf = istream.read(1)
-            if len(buf) == 0:
-                raise EndOfInputStream()
-            read_byte = buf[0]
-            if read_byte != byte:
-                return None
-        return FprimeGdsRecord.decode(istream, fsw_dict)
+        sync_word_index = 0
+        read_next = True
+        while sync_word_index < len(cls.sync_word):
+            if read_next:
+                buf = istream.read(1)
+                if len(buf) == 0:
+                    raise EndOfInputStream()
+            if buf[0] == cls.sync_word[sync_word_index]:
+                sync_word_index += 1
+                read_next = True
+                continue
+            if sync_word_index > 0:
+                sync_word_index = 0
+                read_next = False
+                continue
+            read_next = True
+            continue
+        self = cls()
+        self.record = FprimeGdsRecord.decode(istream, fsw_dict)
+        return self
+
+    def encode(self, ostream):
+        if self.record is None:
+            return
+        assert(isinstance(self.record, FprimeGdsRecord))
+        ostream.write(type(self).sync_word)
+        self.record.encode(ostream)
 
 
 @register_fp_types_custom()
