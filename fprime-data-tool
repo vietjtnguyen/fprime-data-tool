@@ -4,6 +4,7 @@ import enum
 import io
 import json
 import struct
+import types
 
 
 def as_json_obj_helper(obj, keys, extended_dict=None):
@@ -689,12 +690,16 @@ class Packet():
         self = cls()
         try:
             self.type = type(self).Type.decode(istream, fsw_dict)
-        except ValueError:
+        except ValueError as e:
             # TODO (vnguyen): This works but loses what the original type was.
             sys.stderr.write(
-                'WARNING: F Prime packet parsed with unknown type. Forging on '
-                'anyway.\n')
-            self.type = type(self).Type.UNKNOWN
+                'WARNING: F Prime packet parsed with unknown type ('
+                + str(e)
+                + '). Forging on anyway.\n')
+            self.type = types.SimpleNamespace()
+            self.type.value = int(e.args[0].split()[0])
+            self.type.name = 'INVALID'
+            self.type.as_json = lambda: f'{json.dumps(self.type.value)}'
 
         if self.type == type(self).Type.COMMAND:
             self.payload = CommandPacket.decode(istream, fsw_dict)
