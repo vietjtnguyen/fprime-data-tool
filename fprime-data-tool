@@ -5,6 +5,7 @@ import enum
 import io
 import json
 import struct
+import sys
 import types
 
 
@@ -1719,7 +1720,6 @@ class VnlogPrinter():
 if __name__ == '__main__':
     import argparse
     import pathlib
-    import sys
 
     parser = argparse.ArgumentParser(description='''
         fprime-data-tool is a command line utility to read F Prime data in
