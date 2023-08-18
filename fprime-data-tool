@@ -1785,8 +1785,7 @@ if __name__ == '__main__':
         raise KeyError(f'Unknown fundamental_type name "{type_name}"')
 
     fundamental_types_list = ', '.join(
-        "'" + name + "'"
-        for name, _ in fundamental_type_specs)
+        f"'{name}'" for name in fptypes_fundamental.keys())
     for name, default in fprime_configurable_types:
         parser.add_argument(
             f'--{name}',
