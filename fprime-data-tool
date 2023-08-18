@@ -1219,15 +1219,17 @@ class FswDictionary():
             self.element_type_str = elem.get('type')
             self.element_type = None
             self.type_id_str = elem.get('type_id')
-            self.type_id = int(
-                self.type_id_str,
-                base=16 if self.type_id_str.startswith('0x') else 10)
+            if not self.type_id_str is None:
+                self.type_id = int(
+                    self.type_id_str,
+                    base=16 if self.type_id_str.startswith('0x') else 10)
             self.size_str = elem.get('size')
             self.size = int(self.size_str)
             self.format = elem.get('format')
-            self.defaults = [
-                type(self).Default(x)
-                for x in elem.find('defaults').findall('default')]
+            if elem.find('defaults'):
+                self.defaults = [
+                    type(self).Default(x)
+                    for x in elem.find('defaults').findall('default')]
             self.type = None
 
     class Command():
