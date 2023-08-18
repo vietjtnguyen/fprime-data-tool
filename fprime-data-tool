@@ -1328,7 +1328,7 @@ class FswDictionary():
             self.type_str = None
             self.type = None
 
-    def __init__(self, initial_types=None):
+    def __init__(self, initial_types=fp_types):
         self.enums = {}
         self.serializables = {}
         self.arrays = {}
