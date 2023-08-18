@@ -441,7 +441,6 @@ class AsciiBuffer():
 
 
 @register_fp_types('string')
-@register_fp_types_custom()
 class String():
     '''
     Represents a string as a U16 length and a buffer of that length of ASCII
