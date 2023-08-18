@@ -514,14 +514,10 @@ class Time():
             'local_microsecond': f'{json.dumps(local_datetime.microsecond)}',
             'local_iso8601': f'{json.dumps(local_datetime.isoformat())}',
         }
-        attr_list = []
-        if FW_USE_TIME_BASE:
-            attr_list.append('base')
-        if FW_USE_TIME_CONTEXT:
-            attr_list.append('context')
-        attr_list.append('seconds')
-        attr_list.append('microseconds')
-        return as_json_obj_helper(self, attr_list, extended_dict)
+        return as_json_obj_helper(
+            self,
+            ('base', 'context', 'seconds', 'microseconds'),
+            extended_dict)
 
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
