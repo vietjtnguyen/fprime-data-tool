@@ -486,7 +486,6 @@ class String():
 
 
 @register_fp_types('Fw::Time')
-@register_fp_types_custom()
 class Time():
 
     def as_json(self):
