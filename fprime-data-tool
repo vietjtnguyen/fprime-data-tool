@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import ast
 import copy
 import enum
 import io
@@ -49,6 +50,10 @@ fprime_configurable_flags = (
     ('FW_USE_TIME_BASE', True),
     # This controls whether the Time type includes the time context.
     ('FW_USE_TIME_CONTEXT', True),
+    # This controls what the byte representation of a true boolean is.
+    ('FW_SERIALIZE_TRUE_VALUE', 0xff.to_bytes()),
+    # This controls what the byte representation of a false boolean is.
+    ('FW_SERIALIZE_FALSE_VALUE', 0x00.to_bytes()),
 )
 for name, value in fprime_configurable_flags:
     # Put these flags in the global namespace for convenience.
@@ -106,11 +111,10 @@ def make_fundamental_type(name, struct_format):
     return FundamentalType
 
 
-# Specification for fundamental_types.  Instead of manually writing out the
-# types we construct them from this specification which is a tuple of name and
-# struct format.
+# Specification for fundamental types (other than bool).  Instead of manually
+# writing out the types we construct them from this specification which is a
+# tuple of name and struct format.
 fundamental_type_specs = (
-    ('bool', '>?'),
     ('I8', '>b'),
     ('U8', '>B'),
     ('I16', '>h'),
@@ -132,9 +136,69 @@ for name, struct_format in fundamental_type_specs:
     globals()[name] = fp_types[name]
 
 
-# We make one exceptional change to bgol so that the type encodes as a string
-# nicely. The Pythonic form True and False are not valid JSON literals.
-fp_types['bool'].__str__ = lambda self: 'true' if self.value else 'false'
+# Using make_fundamental_type() works for everything except F Prime booleans
+# because F Prime booleans explicitly make true equal to
+# FW_SERIALIZE_TRUE_VALUE and false equal to FW_SERIALIZE_FALSE_VALUE.  This
+# class supports that on encode.  On decode the class supports
+# FW_SERIALIZE_FALSE_VALUE as false and any other value as true.
+@register_fp_types('bool')
+class Bool():
+
+    def __init__(self, value):
+        self.value = value
+
+    @classmethod
+    def decode(cls, istream, fsw_dict=None, length=None):
+        data = istream.read(1)
+        if len(data) == 0:
+            raise EndOfInputStream()
+        if data == FW_SERIALIZE_FALSE_VALUE:
+            return cls(False)
+        else:
+            return cls(True)
+
+    def encode(self, ostream):
+        if self.value:
+            ostream.write(FW_SERIALIZE_TRUE_VALUE)
+        else:
+            ostream.write(FW_SERIALIZE_FALSE_VALUE)
+
+    def as_json(self):
+        return 'true' if self.value else 'false'
+
+    @classmethod
+    def from_object(cls, o):
+        return cls(bool(o))
+
+    @classmethod
+    def from_string(cls, s):
+        assert(isinstance(s, str))
+        if s.lower() == 'true':
+            return cls(True)
+        if s.lower() == 'false':
+            return cls(False)
+        return cls(bool(ast.literal_eval(s)))
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
+    def __format__(self, spec):
+        return format(str(self.value), spec)
+
+    def __int__(self):
+        return int(self.value)
+
+    def __repr__(self):
+        return repr(self.value)
+
+    def __str__(self):
+        return 'true' if self.value else 'false'
+
+# Register it as a type and fundamental type
+fp_types['bool'] = Bool
+fptypes_fundamental['bool'] = Bool
 
 
 #### F Prime configurable types ------------------------------------------------
@@ -1714,10 +1778,9 @@ if __name__ == '__main__':
     for name, default in fprime_configurable_flags:
         parser.add_argument(
             f'--{name}',
-            metavar='BOOL',
             dest=name,
             action='store',
-            type=bool,
+            type=ast.literal_eval,
             default=default,
             help=f'''
                 sets the F Prime configuration for {name}; must be a Python
