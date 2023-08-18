@@ -210,16 +210,16 @@ fptypes_fundamental['bool'] = Bool
 # We also use this list to allow users to override using command line
 # arguments.
 fprime_configurable_types = (
+    ('FwBuffSizeType', U16),
+    ('FwChanIdType', U32),
+    ('FwEnumStoreType', I32),
+    ('FwEventIdType', U32),
+    ('FwOpcodeType', U32),
+    ('FwPacketDescriptorType', U32),
+    ('FwPrmIdType', U32),
     ('FwTimeBaseStoreType', U16),
     ('FwTimeContextStoreType', U8),
-    ('FwPacketDescriptorType', U32),
-    ('FwOpcodeType', U32),
-    ('FwChanIdType', U32),
-    ('FwEventIdType', U32),
-    ('FwPrmIdType', U32),
     ('FwTlmPacketizeIdType', U16),
-    ('FwEnumStoreType', I32),
-    ('FwBuffSizeType', U16),
 )
 for name, value in fprime_configurable_types:
     # Define these types aliases in fp_types so they can be retrieved by name.
