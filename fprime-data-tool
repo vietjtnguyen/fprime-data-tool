@@ -1745,7 +1745,7 @@ if __name__ == '__main__':
         choices=('json', 'tsv', 'vnlog'),
         default='vnlog',
         help=f'''
-            selects the output format; default is \'vnlog\'''')
+            selects the output format; default is vnlog''')
     parser.add_argument(
         '-d', '--dictionary',
         type=pathlib.Path,
@@ -1765,29 +1765,30 @@ if __name__ == '__main__':
         help='''
             specifies the top-level type to parse; the parser will treat the
             input as a concatenated sequence of the specified type; for
-            ComLogger logs use 'ComLoggerRecord' (this is the default); for
-            fprime-gds recv.bin logs use 'FprimeGdsRecord'; for parameter
-            database files use 'PrmDbRecord'; to read an fprime-gds uplink or
-            downlink stream use 'FprimeGdsStream'; you can also specify types
+            ComLogger logs use ComLoggerRecord (this is the default); for
+            fprime-gds recv.bin logs use FprimeGdsRecord; for parameter
+            database files use PrmDbRecord; to read an fprime-gds uplink or
+            downlink stream use FprimeGdsStream; you can also specify types
             that are defined in a loaded dictionary; if you choose a type other
-            than 'ComLoggerRecord' and 'FprimeGdsRecord' then the output format
-            will revert to JSON; types available: {};
+            than ComLoggerRecord and FprimeGdsRecord then the output format
+            will revert to JSON; types available: {}
             '''.format(
                 ', '.join(
-                    f"'{name}'"
+                    f"{name}"
                     for name
                     in list(fp_types.keys()) + list(fp_types_custom.keys()))))
 
     for name, default in fprime_configurable_flags:
         parser.add_argument(
             f'--{name}',
+            metavar='VALUE',
             dest=name,
             action='store',
             type=ast.literal_eval,
             default=default,
             help=f'''
-                sets the F Prime configuration for {name}; must be a Python
-                truthy like 'True' or 'False'; default is \'{default}\'''')
+                sets the F Prime configuration for {name}; default is 
+                {default}''')
 
     def FundamentalType(type_name):
         if type_name in fptypes_fundamental:
@@ -1795,11 +1796,11 @@ if __name__ == '__main__':
         raise KeyError(f'Unknown fundamental_type name "{type_name}"')
 
     fundamental_types_list = ', '.join(
-        f"'{name}'" for name in fptypes_fundamental.keys())
+        f"{name}" for name in fptypes_fundamental.keys())
     for name, default in fprime_configurable_types:
         parser.add_argument(
             f'--{name}',
-            metavar='FUNDAMENTAL_TYPE',
+            metavar='TYPE',
             dest=name,
             action='store',
             type=FundamentalType,
@@ -1807,7 +1808,7 @@ if __name__ == '__main__':
             help=f'''
                 sets the F Prime configuration for {name}; must be one of the
                 following fundamental_types: {fundamental_types_list}; default
-                is \'{default.__name__}\'''')
+                is {default.__name__}''')
 
     args = parser.parse_args()
 
