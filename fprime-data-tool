@@ -768,15 +768,15 @@ class Packet():
     def encode(self, ostream):
         assert(type(self.type) is type(self).Type)
         if self.type == type(self).Type.COMMAND:
-            assert(type(self.payload) is CommandPacket)
+            assert(isinstance(self.payload, CommandPacket))
         elif self.type == type(self).Type.TELEM:
-            assert(type(self.payload) is TelemPacket)
+            assert(isinstance(self.payload, TelemPacket))
         elif self.type == type(self).Type.LOG:
-            assert(type(self.payload) is EventPacket)
+            assert(isinstance(self.payload, EventPacket))
         elif self.type == type(self).Type.FILE:
-            assert(type(self.payload) is FilePacket)
+            assert(isinstance(self.payload, FilePacket))
         else:
-            assert(type(self.payload) is Buffer)
+            assert(isinstance(self.payload, Buffer))
         self.type.encode(ostream)
         self.payload.encode(ostream)
 
