@@ -572,10 +572,12 @@ def read_until_sync_word(istream, sync_word):
 
 
 def create_record_class(name, packet_size_type):
-    PacketSizeType = packet_size_type
+    _packet_size_type = packet_size_type
 
     @register_fp_types_custom(name)
     class Record():
+
+        packet_size_type = _packet_size_type
 
         def as_json(self):
             return as_json_obj_helper(
@@ -589,7 +591,7 @@ def create_record_class(name, packet_size_type):
         def decode(cls, istream, fsw_dict=None, length=None):
             self = cls()
             self.offset = istream.tell() if istream.seekable() else None
-            self.packet_size = PacketSizeType.decode(istream, fsw_dict)
+            self.packet_size = cls.packet_size_type.decode(istream, fsw_dict)
 
             # We slice off the input stream into a buffer and create a new
             # input stream backed by that buffer to pass to the Packet parser.
