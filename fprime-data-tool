@@ -140,23 +140,6 @@ fp_types['bool'].__str__ = lambda self: 'true' if self.value else 'false'
 #### F Prime configurable types ------------------------------------------------
 
 
-# These are F Prime configuration flags (preprocessor definitions) that affect
-# the format of data to be encoded/decoded.
-fprime_configurable_flags = (
-    # Value encoded during serialization for boolean true.
-    ('FW_SERIALIZE_TRUE_VALUE', 0xFF),
-    # Value encoded during serialization for boolean false.
-    ('FW_SERIALIZE_FALSE_VALUE', 0x00),
-    # This controls whether the Time type includes the time base.
-    ('FW_USE_TIME_BASE', True),
-    # This controls whether the Time type includes the time context.
-    ('FW_USE_TIME_CONTEXT', True),
-)
-for name, value in fprime_configurable_flags:
-    # Put these flags in the global namespace for convenience.
-    globals()[name] = value
-
-
 # Another part of F Prime configuration is defining what fundamental types
 # represent various things.  The following are the default type definitions.
 # We also use this list to allow users to override using command line
