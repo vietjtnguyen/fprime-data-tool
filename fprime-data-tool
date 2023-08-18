@@ -394,7 +394,6 @@ class Buffer():
         return str(self.data)
 
 
-@register_fp_types('AsciiBuffer')
 @register_fp_types_custom()
 class AsciiBuffer():
 
