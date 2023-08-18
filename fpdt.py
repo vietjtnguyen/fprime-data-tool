@@ -18,13 +18,39 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+'''
+This tool is built around one notion: the type.  F Prime serialization is based
+on serializing different types.  This tool achieves interoperability by
+basically recreating the types that F Prime uses.  We unfortunately overload
+the term because there are *Python types* and then there are types we create to
+mirror F Prime types.  We actually represent the F Prime types as Python types
+thanks to Python's extremely dynamic nature.  For example there is a custom
+Python type named U64 that represents the same U64 in F Prime land.
+
+What makes one of these Python types representative of an F Prime type is when
+it follows these conventions:
+
+- Has an `as_json()` method that returns a string representing the object as a
+  JSON entity (object, array, or scalar).
+- Has a `decode()` class method that takes an input stream (`io.RawIOBase`),
+  optionally a `FswDictionary`, and optionally a length.  This should read the
+  input stream, decode it, and return an instance of the type.  If the
+  `FswDictionary` is provided it can use it to interpret what gets decoded.
+- Has an `encode()` method that takes an output stream (`io.RawIOBase`) and
+  writes the encoded binary representation of the instance to the provided
+  output stream.
+- Has a `from_object()` class method that takes a Python object and returns an
+  instance of the type based on the Python object.
+'''
 import ast
+import binascii
 import copy
 import enum
 import io
 import json
 import struct
 import sys
+import textwrap
 import types
 
 
@@ -97,7 +123,7 @@ def make_fundamental_type(name, struct_format):
             return str(self)
 
         @classmethod
-        def decode(cls, istream, fsw_dict=None, length=None):
+        def decode(cls, istream: io.RawIOBase, fsw_dict=None, length=None):
             data = istream.read(fundamental_struct.size)
             if len(data) == 0:
                 raise BrokenPipeError()
@@ -105,6 +131,22 @@ def make_fundamental_type(name, struct_format):
 
         def encode(self, ostream):
             ostream.write(fundamental_struct.pack(self.value))
+
+        @classmethod
+        def from_object(cls, o):
+            return cls(o)
+
+        @classmethod
+        def from_string(cls, s):
+            return cls(ast.literal_eval(s))
+
+        def __bool__(self):
+            return bool(self.value)
+
+        def __bytes__(self):
+            buf = io.BytesIO()
+            self.encode(buf)
+            return buf.getvalue()
 
         def __float__(self):
             return float(self.value)
@@ -280,6 +322,11 @@ for name, value in fprime_configurable_types:
 # type.
 def enum_represented_as(enum_underlying_type):
     def decorator(type):
+
+        def as_json(self):
+            return f'{json.dumps(self.name)}'
+        type.as_json = as_json
+
         def decode(cls, istream, fsw_dict=None, length=None):
             untyped = enum_underlying_type.decode(istream, fsw_dict)
             return cls(untyped.value)
@@ -290,13 +337,24 @@ def enum_represented_as(enum_underlying_type):
             untyped.encode(ostream)
         type.encode = encode
 
-        def as_json(self):
-            return f'{json.dumps(self.name)}'
-        type.as_json = as_json
+        @classmethod
+        def from_object(cls, o):
+            if isinstance(o, str):
+                return cls[o]
+            return cls(o)
+        type.from_object = from_object
+
+        def __bytes__(self):
+            buf = io.BytesIO()
+            self.encode(buf)
+            return buf.getvalue()
+        type.__bytes__ = __bytes__
 
         def __str__(self):
             return self.name
         type.__str__ = __str__
+
+        type.__doc__ = '\n'.join(f'{x.name}={x.value}' for x in iter(type))
 
         return type
 
@@ -311,22 +369,16 @@ def make_array_type(name, element_type, size):
         element_type = _element_type
         size = _size
 
-        def __init__(self, elements):
-            self.elements = elements
-            assert(len(self.elements) == type(self).size)
-            for element in self.elements:
-                assert(type(element) == type(self).element_type)
-
         def as_json(self):
             return '[' + ', '.join(x.as_json() for x in self.elements) + ']'
 
         @classmethod
         def decode(cls, istream, fsw_dict=None, length=None):
-            elements = [
+            self = cls()
+            self.elements = [
                 cls.element_type.decode(istream, fsw_dict)
                 for i in range(cls.size)
             ]
-            self = cls(elements)
             return self
 
         def encode(self, ostream):
@@ -335,6 +387,23 @@ def make_array_type(name, element_type, size):
             for element in self.elements:
                 assert(type(element) == type(self).element_type)
                 element.encode(ostream)
+
+        @classmethod
+        def from_object(cls, o):
+            assert(len(o) == cls.size)
+            self = cls()
+            self.elements = [None] * cls.size
+            for i, element in enumerate(o):
+                if type(element) is cls.element_type:
+                    self.elements[i] = element
+                else:
+                    self.elements[i] = cls.element_type.from_object(element)
+            return self
+
+        def __bytes__(self):
+            buf = io.BytesIO()
+            self.encode(buf)
+            return buf.getvalue()
 
         def __getitem__(self, index):
             return self.elements[index]
@@ -392,6 +461,23 @@ def make_serializable_type(name, member_defs):
                 assert(type(member_value) is member_type)
                 member_value.encode(ostream)
 
+        @classmethod
+        def from_object(cls, *args, **kwargs):
+            self = cls()
+            for i, (member_name, member_type) in enumerate(cls.member_defs):
+                assert(i < len(args) or member_name in kwargs)
+                o = kwargs[member_name] if member_name in kwargs else args[i]
+                if type(o) is member_type:
+                    setattr(self, member_name, o)
+                else:
+                    setattr(self, member_name, member_type.from_object(o))
+            return self
+
+        def __bytes__(self):
+            buf = io.BytesIO()
+            self.encode(buf)
+            return buf.getvalue()
+
     Serializable.__name__ = name
 
     return Serializable
@@ -402,9 +488,6 @@ def make_serializable_type(name, member_defs):
 
 @register_fp_types_custom()
 class Buffer():
-
-    def __init__(self, data=b''):
-        self.data = data
 
     def as_json(self):
         return f'"0x{self.data.hex()}"'
@@ -445,9 +528,6 @@ class Buffer():
 
 @register_fp_types_custom()
 class AsciiBuffer():
-
-    def __init__(self, string=b''):
-        self.string = string
 
     def as_json(self):
         return json.dumps(self.string)
@@ -499,9 +579,6 @@ class String():
     length of ASCII characters.
     '''
 
-    def __init__(self, string=b''):
-        self.string = string
-
     def as_json(self):
         return (
             '{'
@@ -525,10 +602,36 @@ class String():
         assert(type(self.length) is FwBuffSizeType)
         assert(type(self.string) is string)
         self.length.encode(ostream)
-        ostream.write(self.string.encode('ascii'))
+        if hasattr(self, 'string_raw'):
+            assert(isinstance(self.string_raw, bytes))
+            ostream.write(self.string_raw)
+        elif hasattr(self, 'string'):
+            assert(isinstance(self.string, str))
+            ostream.write(self.string.encode('ascii'))
+        else:
+            raise ValueError('String should have string or string_raw attr')
+
+    @classmethod
+    def from_object(cls, o):
+        assert(isinstance(o, str) or isinstance(o, bytes))
+        self = cls()
+        assert(len(o) < 2 ** 16)
+        self.length = FwBuffSizeType.from_object(len(o))
+        if isinstance(o, bytes):
+            self.string_raw = o
+            self.string = self.string_raw.decode('ascii')
+        elif isinstance(o, str):
+            self.string = o
+            self.string_raw = self.string.encode('ascii')
+        else:
+            raise ValueError(
+                'String should be made from string or bytes object')
+        return self
 
     def __bytes__(self):
-        return bytes(self.string)
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
     def __len__(self):
         return len(self.string)
@@ -605,6 +708,11 @@ class Time():
         self.seconds = U32.decode(ostream, fsw_dict)
         self.microseconds = U32.decode(ostream, fsw_dict)
 
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
     def __str__(self):
         return str(float(self.seconds) + float(self.microseconds) * 1e-6)
 
@@ -671,7 +779,27 @@ def create_record_class(name, packet_size_type):
             assert(type(self.packet_size) is packet_size_type)
             # TODO (vnguyen): Be smart about automatically calculating this.
             self.packet_size.encode(ostream)
-            self.packet.encode(ostream)
+            if hasattr(self, 'packet_encoded'):
+                ostream.write(self.packet_encoded)
+            else:
+                self.packet.encode(ostream)
+
+        @classmethod
+        def from_object(cls, o):
+            self = cls()
+            if isinstance(o, Packet):
+                self.packet = o
+            else:
+                self.packet = Packet.from_object(o)
+            self.packet_encoded = bytes(self.packet)
+            self.packet_size = cls.packet_size_type.from_object(
+                len(self.packet_encoded))
+            return self
+
+        def __bytes__(self):
+            buf = io.BytesIO()
+            self.encode(buf)
+            return buf.getvalue()
 
     Record.__name__ = name
     return Record
@@ -705,8 +833,26 @@ class FprimeGdsStream():
         if self.record is None:
             return
         assert(isinstance(self.record, FprimeGdsRecord))
-        ostream.write(type(self).sync_word)
-        self.record.encode(ostream)
+        buf = io.BytesIO()
+        buf.write(type(self).sync_word)
+        self.record.encode(buf)
+        buf = buf.getvalue()
+        ostream.write(buf)
+        ostream.write(struct.pack('>I', binascii.crc32(buf)))
+
+    @classmethod
+    def from_object(cls, o):
+        self = cls()
+        if isinstance(o, FprimeGdsRecord):
+            self.record = o
+        else:
+            self.record = FprimeGdsRecord.from_object(o)
+        return self
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 @register_fp_types_custom()
@@ -766,6 +912,11 @@ class PrmDbRecord():
     def encode(self, ostream):
         assert(type(self.type) is type(self).Type)
         self.type.encode(ostream)
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 #### F Prime packet types ------------------------------------------------------
@@ -840,6 +991,46 @@ class Packet():
             assert(isinstance(self.payload, Buffer))
         self.type.encode(ostream)
         self.payload.encode(ostream)
+
+    @classmethod
+    def from_object(cls, o):
+        self = cls()
+        if isinstance(o, CommandPacket):
+            self.type = type(self).Type.COMMAND
+            self.payload = o
+        elif isinstance(o, TelemPacket):
+            self.type = type(self).Type.TELEM
+            self.payload = o
+        elif isinstance(o, EventPacket):
+            self.type = type(self).Type.LOG
+            self.payload = o
+        elif isinstance(o, FilePacket):
+            self.type = type(self).Type.FILE
+            self.payload = o
+        elif isinstance(o, Buffer):
+            self.type = type(self).Type.UNKNOWN
+            self.payload = o
+        else:
+            assert(len(o) == 2)
+            self.type = type(self).Type.from_object(o[0])
+            if self.type == type(self).Type.COMMAND:
+                self.payload = CommandPacket.from_object(o)
+            elif self.type == type(self).Type.TELEM:
+                self.payload = TelemPacket.from_object(o)
+            elif self.type == type(self).Type.LOG:
+                self.payload = EventPacket.from_object(o)
+            elif self.type == type(self).Type.FILE:
+                self.payload = FilePacket.from_object(o)
+            elif self.type == type(self).Type.UNKNOWN:
+                self.payload = Buffer.from_object(o)
+            else:
+                raise NotImplemented()
+        return self
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 @register_fp_types_custom()
@@ -917,9 +1108,20 @@ class CommandPacket():
 
     def encode(self, ostream):
         assert(type(self.opcode) == FwOpcodeType)
-        assert(type(self.arguments_raw) == Buffer)
         self.opcode.encode(ostream)
-        self.arguments_raw.encode(ostream)
+
+        if self.arguments is None:
+            assert(type(self.arguments_raw) == Buffer)
+            self.arguments_raw.encode(ostream)
+            return
+
+        for arg in self.arguments:
+            arg.encode(ostream)
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 @register_fp_types_custom()
@@ -978,6 +1180,11 @@ class TelemPacket():
         self.id.encode(ostream)
         self.time.encode(ostream)
         self.value_raw.encode(ostream)
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 @register_fp_types_custom()
@@ -1091,6 +1298,11 @@ class EventPacket():
         self.time.encode(ostream)
         self.arguments_raw.encode(ostream)
 
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
 
 @register_fp_types_custom()
 class FilePacketPathName():
@@ -1111,6 +1323,11 @@ class FilePacketPathName():
         assert(len(self.value) == self.length)
         self.length.encode(ostream)
         self.value.encode(ostream)
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
     def __str__(self):
         return self.value.encode('ascii')
@@ -1168,6 +1385,11 @@ class FilePacket():
         self.sequence_index.encode(ostream)
         self.payload.encode(ostream)
 
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
 
 @register_fp_types_custom()
 class FilePacketStartPayload():
@@ -1189,6 +1411,11 @@ class FilePacketStartPayload():
         self.file_size.encode(ostream)
         self.source_path.encode(ostream)
         self.destination_path.encode(ostream)
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 @register_fp_types_custom()
@@ -1216,6 +1443,11 @@ class FilePacketDataPayload():
         self.data_size.encode(ostream)
         self.data.encode(ostream)
 
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
 
 @register_fp_types_custom()
 class FilePacketEndPayload():
@@ -1233,6 +1465,11 @@ class FilePacketEndPayload():
         assert(type(self.checksum) is U32)
         self.checksum.encode(ostream)
 
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
+
 
 @register_fp_types_custom()
 class FilePacketCancelPayload():
@@ -1247,6 +1484,11 @@ class FilePacketCancelPayload():
 
     def encode(self, ostream):
         pass
+
+    def __bytes__(self):
+        buf = io.BytesIO()
+        self.encode(buf)
+        return buf.getvalue()
 
 
 #### Dictionary ----------------------------------------------------------------
@@ -1325,6 +1567,22 @@ class FswDictionary():
                 self.type_str = elem.get('type')
                 self.type = None
 
+            def update_docstring(self, command, fsw_dict):
+                self.__doc__ = f'  {self.name}: {self.type_str}'
+                if self.type_str == 'string':
+                    self.__doc__ += f'[{self.length}]'
+                if self.type_str in fsw_dict.enums:
+                    enum_def = fsw_dict.enums[self.type_str]
+                    self.__doc__ += '\n'
+                    for item in enum_def.items:
+                        self.__doc__ += '\n    {} = {}: {}'.format(
+                            item.name,
+                            item.value,
+                            item.description or '(no description)')
+                if self.description:
+                    self.__doc__ += '\n\n{}'.format(
+                        textwrap.indent(self.description.strip(), '    '))
+
         def __init__(self, elem):
             self.component = elem.get('component')
             self.mnemonic = elem.get('mnemonic')
@@ -1344,6 +1602,27 @@ class FswDictionary():
                     for x in elem.find('args').findall('arg')]
             else:
                 self.args = []
+
+        def update_docstring(self, fsw_dict):
+            for arg in self.args:
+                arg.update_docstring(self, fsw_dict)
+            self.__doc__ = \
+                f'{self.description}\n\nArguments:\n\n' \
+                + '\n\n'.join(arg.__doc__ for arg in self.args)
+
+        def __call__(self, *args, **kwargs):
+            packet = CommandPacket()
+            packet.opcode = FwOpcodeType.from_object(self.opcode)
+            packet.command = self
+            packet.arguments = [None] * len(self.args)
+            for i, arg_def in enumerate(self.args):
+                assert(i < len(args) or arg_def.name in kwargs)
+                o = kwargs[arg_def.name] if arg_def.name in kwargs else args[i]
+                if type(o) is arg_def.type:
+                    packet.arguments[i] = o
+                else:
+                    packet.arguments[i] = arg_def.type.from_object(o)
+            return packet
 
     class Event():
 
@@ -1481,6 +1760,8 @@ class FswDictionary():
         self.construct_types(fsw_dict_file_path)
         self.resolve_types()
 
+        self.create_commanding_namespace()
+
     def register_type(self, fsw_dict_file_path, type_name, type):
         if type_name in self.types:
             sys.stderr.write(
@@ -1601,6 +1882,47 @@ class FswDictionary():
                 continue
             parameter.type_str = set_command.args[0].type_str
             parameter.type = set_command.args[0].type
+
+    def create_commanding_namespace(self):
+
+        class ComponentsNamespace():
+            pass
+
+        class ComponentCommandsNamespace():
+
+            def __init__(self, name):
+                self.name = name
+
+        self.send = ComponentsNamespace()
+        for (component, mnemonic), command_def in self.commands.items():
+            command_def.update_docstring(self)
+            if not hasattr(self.send, component):
+                setattr(
+                    self.send,
+                    component,
+                    ComponentCommandsNamespace(component))
+            setattr(getattr(self.send, component), mnemonic, command_def)
+
+        self.components = list(sorted(set(x[0] for x in self.commands.keys())))
+        self.send.__doc__ = \
+            'Components available:\n\n' + '\n'.join(self.components)
+        for component_name in self.components:
+            component_ns = getattr(self.send, component_name)
+            component_ns.commands = \
+                list(sorted(set(
+                    x[1]
+                    for x in self.commands.keys()
+                    if x[0] == component_ns.name)))
+            component_ns.__doc__ = \
+                'Commands available for this component:\n\n' \
+                + '\n'.join(
+                    '{}({})'.format(
+                        mnemonic,
+                        ', '.join(
+                            f'{arg_def.name}: {arg_def.type_str}'
+                            for arg_def
+                            in self.commands[(component_name, mnemonic)].args))
+                    for mnemonic in component_ns.commands)
 
 
 #### Printers ------------------------------------------------------------------
@@ -1848,6 +2170,14 @@ if __name__ == '__main__':
             `fp_types_custom` and can be specified as a top-level type using
             --record-type''')
     parser.add_argument(
+        '-C', '--commanding-mode',
+        nargs=1,
+        type=argparse.FileType('wb'),
+        default=None,
+        help='''
+            enters a REPL where commands can be sent to the specified file; the
+            input stream is ignored''')
+    parser.add_argument(
         '-R', '--record-type',
         type=str,
         default='ComLoggerRecord',
@@ -1938,6 +2268,28 @@ if __name__ == '__main__':
             f'ERROR: Record type "{record_type.__name__}" does not have a '
             'decode attribute.  The type must have a decode class function.\n')
         sys.exit(1)
+
+    if args.commanding_mode:
+        if fsw_dict is None:
+            sys.stderr.write(
+                'ERROR: A dictionary must be loaded in commanding mode.\n')
+            sys.exit(1)
+        from ptpython.ipython import embed
+        ostream = args.commanding_mode[0]
+        for component_name in fsw_dict.components:
+            globals()[component_name] = getattr(fsw_dict.send, component_name)
+        def send(command_packet):
+            assert(isinstance(command_packet, CommandPacket))
+            record = FprimeGdsStream.from_object(
+                FprimeGdsRecord.from_object(command_packet))
+            bytes_sent = ostream.write(bytes(record))
+            print(f'Wrote {bytes_sent} bytes')
+            ostream.flush()
+            return bytes_sent
+        globals()['send'] = send
+        embed()
+        ostream.close()
+        sys.exit()
 
     if record_type is not ComLoggerRecord and \
             record_type is not FprimeGdsRecord:
