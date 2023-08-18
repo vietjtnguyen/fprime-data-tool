@@ -551,6 +551,26 @@ class Time():
 #### Record types --------------------------------------------------------------
 
 
+def read_until_sync_word(istream, sync_word):
+    sync_word_index = 0
+    read_next = True
+    while sync_word_index < len(sync_word):
+        if read_next:
+            buf = istream.read(1)
+            if len(buf) == 0:
+                raise EndOfInputStream()
+        if buf[0] == sync_word[sync_word_index]:
+            sync_word_index += 1
+            read_next = True
+            continue
+        if sync_word_index > 0:
+            sync_word_index = 0
+            read_next = False
+            continue
+        read_next = True
+        continue
+
+
 def create_record_class(name, packet_size_type):
     PacketSizeType = packet_size_type
 
@@ -613,23 +633,7 @@ class FprimeGdsStream():
 
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
-        sync_word_index = 0
-        read_next = True
-        while sync_word_index < len(cls.sync_word):
-            if read_next:
-                buf = istream.read(1)
-                if len(buf) == 0:
-                    raise EndOfInputStream()
-            if buf[0] == cls.sync_word[sync_word_index]:
-                sync_word_index += 1
-                read_next = True
-                continue
-            if sync_word_index > 0:
-                sync_word_index = 0
-                read_next = False
-                continue
-            read_next = True
-            continue
+        read_until_sync_word(istream, cls.sync_word)
         self = cls()
         self.record = FprimeGdsRecord.decode(istream, fsw_dict)
         return self
