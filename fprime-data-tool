@@ -70,7 +70,7 @@ def make_fundamental_type(name, struct_format):
 
     class FundamentalType():
 
-        def __init__(self, value = 0):
+        def __init__(self, value):
             self.value = value
 
         @classmethod
