@@ -218,6 +218,7 @@ fprime_configurable_types = (
     ('FwEventIdType', U32),
     ('FwPrmIdType', U32),
     ('FwTlmPacketizeIdType', U16),
+    ('FwEnumStoreType', I32),
 )
 for name, value in fprime_configurable_types:
     # Define these types aliases in fp_types so they can be retrieved by name.
@@ -1419,8 +1420,7 @@ class FswDictionary():
             if not enum_def.type is None:
                 continue
 
-            # Apparently F Prime encodes all generated enums as I32.
-            enum_def.type = enum_represented_as(I32)(
+            enum_def.type = enum_represented_as(FwEnumStoreType)(
                 enum.IntEnum(
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
