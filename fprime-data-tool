@@ -39,128 +39,6 @@ def register_fp_types_custom(name=None):
     return register_fp_types_custom_decorator
 
 
-# Class decorator factory for extending an enum.IntEnum based class with an
-# decode class function and encode method based on the provided underlying
-# type.
-def enum_represented_as(enum_underlying_type):
-    def decorator(type):
-        def decode(cls, istream, fsw_dict=None, length=None):
-            untyped = enum_underlying_type.decode(istream, fsw_dict)
-            return cls(untyped.value)
-        type.decode = classmethod(decode)
-
-        def encode(self, ostream):
-            untyped = enum_underlying_type(self.value)
-            untyped.encode(ostream)
-        type.encode = encode
-
-        def as_json(self):
-            return f'{json.dumps(self.name)}'
-        type.as_json = as_json
-
-        def __str__(self):
-            return self.name
-        type.__str__ = __str__
-
-        return type
-
-    return decorator
-
-
-def make_array_type(name, element_type, size):
-    _element_type = element_type
-    _size = size
-
-    class Array():
-        element_type = _element_type
-        size = _size
-
-        def __init__(self, elements):
-            self.elements = elements
-            assert(len(self.elements) == type(self).size)
-            for element in self.elements:
-                assert(type(element) == type(self).element_type)
-
-        def as_json(self):
-            return '[' + ', '.join(x.as_json() for x in self.elements) + ']'
-
-        @classmethod
-        def decode(cls, istream, fsw_dict=None, length=None):
-            elements = [
-                cls.element_type.decode(istream, fsw_dict)
-                for i in range(cls.size)
-            ]
-            self = cls(elements)
-            return self
-
-        def encode(self, ostream):
-            assert(type(self.elements) is list)
-            assert(len(self.elements) == type(self).size)
-            for element in self.elements:
-                assert(type(element) == type(self).element_type)
-                element.encode(ostream)
-
-        def __getitem__(self, index):
-            return self.elements[index]
-
-        def __iter__(self):
-            return iter(self)
-
-        def __len__(self):
-            return len(self.elements)
-
-        def __repr__(self):
-            return repr(self.elements)
-
-        def __setitem__(self, index, value):
-            self.elements[index].value = value
-
-        def __str__(self):
-            return str(self.elements)
-
-    Array.__name__ = name
-
-    return Array
-
-
-def make_serializable_type(name, member_defs):
-    _member_defs = member_defs
-
-    class Serializable():
-        member_defs = _member_defs
-
-        def as_json(self):
-            return (
-                '{'
-                + ', '.join(
-                    '{}: {}'.format(
-                        json.dumps(member_name),
-                        getattr(self, member_name).as_json())
-                    for member_name, _ in type(self).member_defs)
-                + '}'
-            )
-
-        @classmethod
-        def decode(cls, istream, fsw_dict=None, length=None):
-            self = cls()
-            for member_name, member_type in type(self).member_defs:
-                setattr(
-                    self,
-                    member_name,
-                    member_type.decode(istream, fsw_dict))
-            return self
-
-        def encode(self, ostream):
-            for member_name, member_type in type(self).member_defs:
-                member_value = getattr(self, member_name)
-                assert(type(member_value) is member_type)
-                member_value.encode(ostream)
-
-    Serializable.__name__ = name
-
-    return Serializable
-
-
 #### F Prime configuration flags -----------------------------------------------
 
 
@@ -298,6 +176,131 @@ for name, value in fprime_configurable_types:
     fp_types[name] = value
     # Also put the type alias into the global namespace for convenience.
     globals()[name] = value
+
+
+#### Basic non-fundamental type factories --------------------------------------
+
+
+# Class decorator factory for extending an enum.IntEnum based class with an
+# decode class function and encode method based on the provided underlying
+# type.
+def enum_represented_as(enum_underlying_type):
+    def decorator(type):
+        def decode(cls, istream, fsw_dict=None, length=None):
+            untyped = enum_underlying_type.decode(istream, fsw_dict)
+            return cls(untyped.value)
+        type.decode = classmethod(decode)
+
+        def encode(self, ostream):
+            untyped = enum_underlying_type(self.value)
+            untyped.encode(ostream)
+        type.encode = encode
+
+        def as_json(self):
+            return f'{json.dumps(self.name)}'
+        type.as_json = as_json
+
+        def __str__(self):
+            return self.name
+        type.__str__ = __str__
+
+        return type
+
+    return decorator
+
+
+def make_array_type(name, element_type, size):
+    _element_type = element_type
+    _size = size
+
+    class Array():
+        element_type = _element_type
+        size = _size
+
+        def __init__(self, elements):
+            self.elements = elements
+            assert(len(self.elements) == type(self).size)
+            for element in self.elements:
+                assert(type(element) == type(self).element_type)
+
+        def as_json(self):
+            return '[' + ', '.join(x.as_json() for x in self.elements) + ']'
+
+        @classmethod
+        def decode(cls, istream, fsw_dict=None, length=None):
+            elements = [
+                cls.element_type.decode(istream, fsw_dict)
+                for i in range(cls.size)
+            ]
+            self = cls(elements)
+            return self
+
+        def encode(self, ostream):
+            assert(type(self.elements) is list)
+            assert(len(self.elements) == type(self).size)
+            for element in self.elements:
+                assert(type(element) == type(self).element_type)
+                element.encode(ostream)
+
+        def __getitem__(self, index):
+            return self.elements[index]
+
+        def __iter__(self):
+            return iter(self)
+
+        def __len__(self):
+            return len(self.elements)
+
+        def __repr__(self):
+            return repr(self.elements)
+
+        def __setitem__(self, index, value):
+            self.elements[index].value = value
+
+        def __str__(self):
+            return str(self.elements)
+
+    Array.__name__ = name
+
+    return Array
+
+
+def make_serializable_type(name, member_defs):
+    _member_defs = member_defs
+
+    class Serializable():
+        member_defs = _member_defs
+
+        def as_json(self):
+            return (
+                '{'
+                + ', '.join(
+                    '{}: {}'.format(
+                        json.dumps(member_name),
+                        getattr(self, member_name).as_json())
+                    for member_name, _ in type(self).member_defs)
+                + '}'
+            )
+
+        @classmethod
+        def decode(cls, istream, fsw_dict=None, length=None):
+            self = cls()
+            for member_name, member_type in type(self).member_defs:
+                setattr(
+                    self,
+                    member_name,
+                    member_type.decode(istream, fsw_dict))
+            return self
+
+        def encode(self, ostream):
+            for member_name, member_type in type(self).member_defs:
+                member_value = getattr(self, member_name)
+                assert(type(member_value) is member_type)
+                member_value.encode(ostream)
+
+    Serializable.__name__ = name
+
+    return Serializable
 
 
 #### Basic non-fundamental types -----------------------------------------------
