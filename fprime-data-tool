@@ -81,7 +81,7 @@ def make_fundamental_type(name, struct_format):
             return cls(fundamental_struct.unpack(data)[0])
 
         def encode(self, ostream):
-            return ostream.write(fundamental_struct.pack(self.value))
+            ostream.write(fundamental_struct.pack(self.value))
 
         def as_json(self):
             return str(self)
