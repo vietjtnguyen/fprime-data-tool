@@ -651,6 +651,8 @@ class FprimeGdsStream():
 @register_fp_types_custom()
 class PrmDbRecord():
 
+    sync_word = bytes.fromhex('a5')
+
     def as_json(self):
         extended_dict = {
             'id_hex': f'{json.dumps(hex(self.id.value))}',
@@ -678,8 +680,7 @@ class PrmDbRecord():
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         self.offset = istream.tell() if istream.seekable() else None
-        self.sync_marker = U8.decode(istream, fsw_dict)
-        assert(self.sync_marker.value == 0xa5)
+        read_until_sync_word(istream, cls.sync_word)
         self.size = U32.decode(istream, fsw_dict)
         self.id = FwPrmIdType.decode(istream, fsw_dict)
         self.value_raw = Buffer.decode(istream, fsw_dict, self.size.value - 4)
