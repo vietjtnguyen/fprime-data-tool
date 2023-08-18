@@ -1755,13 +1755,13 @@ if __name__ == '__main__':
         help='''
             specifies the top-level type to parse; the parser will treat the
             input as a concatenated sequence of the specified type; for
-            ComLogger logs use 'ComLoggerRecord'; for fprime-gds recv.bin logs
-            use 'FprimeGdsRecord'; parameter database files use 'PrmDbRecord';
-            default is 'ComLoggerRecord'; typical choices are
-            'ComLoggerRecord', 'FprimeGdsRecord', and 'PrmDbRecord' but can be
-            any type defined with a decode class function; however if you
-            choose a type other than 'ComLoggerRecord' and 'FprimeGdsRecord'
-            then the output format will revert to JSON; types available: {};
+            ComLogger logs use 'ComLoggerRecord' (this is the default); for
+            fprime-gds recv.bin logs use 'FprimeGdsRecord'; for parameter
+            database files use 'PrmDbRecord'; to read an fprime-gds uplink or
+            downlink stream use 'FprimeGdsStream'; you can also specify types
+            that are defined in a loaded dictionary; if you choose a type other
+            than 'ComLoggerRecord' and 'FprimeGdsRecord' then the output format
+            will revert to JSON; types available: {};
             '''.format(
                 ', '.join(
                     f"'{name}'"
