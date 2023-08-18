@@ -219,6 +219,7 @@ fprime_configurable_types = (
     ('FwPrmIdType', U32),
     ('FwTlmPacketizeIdType', U16),
     ('FwEnumStoreType', I32),
+    ('FwBuffSizeType', U16),
 )
 for name, value in fprime_configurable_types:
     # Define these types aliases in fp_types so they can be retrieved by name.
@@ -444,8 +445,8 @@ class AsciiBuffer():
 @register_fp_types('string')
 class String():
     '''
-    Represents a string as a U16 length and a buffer of that length of ASCII
-    characters.
+    Represents a string as a length (FwBuffSizeType) and a buffer of that
+    length of ASCII characters.
     '''
 
     def __init__(self, string=b''):
@@ -462,13 +463,13 @@ class String():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=-1):
         self = cls()
-        self.length = U16.decode(istream, fsw_dict)
+        self.length = FwBuffSizeType.decode(istream, fsw_dict)
         self.string_raw = istream.read(self.length.value)
         self.string = self.string_raw.decode('ascii')
         return self
 
     def encode(self, ostream):
-        assert(type(self.length) is U16)
+        assert(type(self.length) is FwBuffSizeType)
         assert(type(self.string) is string)
         self.length.encode(ostream)
         ostream.write(self.string.encode('ascii'))
