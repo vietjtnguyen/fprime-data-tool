@@ -10,7 +10,7 @@ import types
 def as_json_obj_helper(obj, keys, extended_dict=None):
     attrs = list(
         f'{json.dumps(key)}: {getattr(obj, key).as_json()}'
-        for key in keys)
+        for key in keys if hasattr(obj, key))
     if extended_dict:
         attrs.extend(
             f'{json.dumps(key)}: {value}'
