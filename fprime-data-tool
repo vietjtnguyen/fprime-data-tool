@@ -744,7 +744,6 @@ class Packet():
         try:
             self.type = type(self).Type.decode(istream, fsw_dict)
         except ValueError as e:
-            # TODO (vnguyen): This works but loses what the original type was.
             sys.stderr.write(
                 'WARNING: F Prime packet parsed with unknown type ('
                 + str(e)
