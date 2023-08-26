@@ -882,6 +882,7 @@ class TelemPacket():
                 f'{json.dumps(self.channel.topology_name)}'
             extended_dict['component'] = f'{json.dumps(self.channel.component)}'
             extended_dict['name'] = f'{json.dumps(self.channel.name)}'
+            extended_dict['type'] = f'{json.dumps(self.channel.type_str)}'
 
         if not self.value is None:
             extended_dict['value'] = self.value.as_json()
