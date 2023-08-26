@@ -486,6 +486,12 @@ class String():
     def __str__(self):
         return str(self.string)
 
+    # All of the other fundamental types can get their value using the `value`
+    # attribute so we mimic that here with string.
+    value = property(
+        fget=lambda self: self.string
+    )
+
 
 @register_fp_types('Fw::Time')
 class Time():
@@ -932,6 +938,20 @@ class EventPacket():
             extended_dict['topology_name'] = \
                 f'{json.dumps(self.event.topology_name)}'
             extended_dict['component'] = f'{json.dumps(self.event.component)}'
+            try:
+                extended_dict['message'] = \
+                    json.dumps(
+                        self.event.format_string
+                        % tuple(arg.value for arg in self.arguments))
+            except:
+                try:
+                    extended_dict['message'] = \
+                        json.dumps(
+                            self.event.format_string.format(*
+                                tuple(arg.value for arg in self.arguments)))
+                except:
+                    extended_dict['message'] = \
+                        json.dumps(self.event.format_string)
             extended_dict['name'] = f'{json.dumps(self.event.name)}'
             extended_dict['severity'] = f'{json.dumps(self.event.severity_str)}'
 
