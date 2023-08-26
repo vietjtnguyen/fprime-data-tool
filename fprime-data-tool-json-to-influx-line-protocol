@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+import ast
+import io
+import json
+import sys
+
+
+class LineProtocolRecord():
+
+    def __init__(self, measurement_name, tags, fields, time_us):
+        self.measurement_name = measurement_name
+        self.tags = tags
+        self.fields = fields
+        self.time_us = time_us
+
+    def __str__(self):
+        ostream = io.StringIO()
+        ostream.write(f'{self.measurement_name}')
+        if len(self.tags) > 0:
+            ostream.write(',')
+            ostream.write(','.join(
+                f'{k}="{v}"'
+                for k, v in self.tags.items()))
+        ostream.write(' ')
+        ostream.write(','.join(
+            f'{k}={json.dumps(v)}'
+            for k, v in self.fields.items()))
+        ostream.write(f' {self.time_us}')
+        return ostream.getvalue()
+
+
+def severity_to_grafana(severity):
+    if severity == 'DIAGNOSTIC':
+        return 'trace'
+    elif severity == 'ACTIVITY_LO':
+        return 'debug'
+    elif severity == 'ACTIVITY_HI':
+        return 'info'
+    elif severity == 'WARNING_LO':
+        return 'warning'
+    elif severity == 'WARNING_HI':
+        return 'error'
+    elif severity == 'COMMAND':
+        return 'debug'
+    elif severity == 'FATAL':
+        return 'critical'
+    return 'unknown'
+
+
+def telem_record_from_telem_packet(packet, extra_tags={}):
+    payload = packet['payload']
+    tags={
+        'component': payload['component'],
+        'id': payload['id'],
+        'kind': 'telem',
+        'name': payload['name'],
+    }
+    tags.update(extra_tags)
+    fields = {}
+    # TODO (vnguyen): Handle serializables
+    if isinstance(payload['value'], list):
+        for i, elem in enumerate(payload['value']):
+            fields[f'value{i}'] = elem
+    else:
+        fields['value'] = payload['value']
+    return LineProtocolRecord(
+        measurement_name=f'telem.{payload["topology_name"]}',
+        tags=tags,
+        fields=fields,
+        time_us=int(payload['time']['value'] * 1e6))
+
+
+def event_record_from_event_packet(packet, extra_tags={}):
+    payload = packet['payload']
+    tags = {
+        'component': payload['component'],
+        'id': payload['id'],
+        'kind': 'log',
+        'name': payload['name'],
+        'severity': payload['severity'],
+    }
+    tags.update(extra_tags)
+    fields={
+        'message': payload['message'],
+    }
+    # TODO (vnguyen): Handle arrays
+    # TODO (vnguyen): Handle serializables
+    for arg in payload['arguments']:
+        if arg['type'] == 'string':
+            fields[arg['name']] = arg['value']['string']
+        else:
+            fields[arg['name']] = arg['value']
+    return LineProtocolRecord(
+        measurement_name=f'event.{payload["topology_name"]}',
+        tags=tags,
+        fields=fields,
+        time_us=int(payload['time']['value'] * 1e6))
+
+
+def log_record_from_event_packet(packet, extra_tags={}):
+    payload = packet['payload']
+    tags = {
+        'component': payload['component'],
+        'id': payload['id'],
+        'kind': 'log',
+        'name': payload['name'],
+        'severity': payload['severity'],
+    }
+    tags.update(extra_tags)
+    return LineProtocolRecord(
+        measurement_name='log',
+        tags=tags,
+        fields={
+            'message': \
+                f'severity={payload["severity"]} ' \
+                + f'level={severity_to_grafana(payload["severity"])} ' \
+                + payload['message'],
+        },
+        time_us=int(payload['time']['value'] * 1e6))
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='''
+        Converts the JSON output parsed using fprime-data-tool with record
+        types of ComLoggerRecord, FprimeGdsRecord, or FprimeGdsSteam and turns
+        it into InfluxDB line protocol. NOTE THAT THE TIMESTAMPS OUTPUT ARE IN
+        MICROSECONDS SO YOU MUST PASS `-p us` TO `influx write`.''')
+
+    parser.add_argument(
+        'istream',
+        nargs='?',
+        type=argparse.FileType('r'),
+        default=sys.stdin,
+        help='''
+            input file (default: read from stdin)''')
+    parser.add_argument(
+        '-f', '--extra-tags',
+        action='store',
+        help='''
+            adds extra tags to all line protocol records output from the Python
+            dictionary literal provided; remember that all fields must be
+            string type so even if you specify a numeric value it will be
+            quoted in the line protocol output; for example: `{"test_session":
+            "dm_003", "agent_id": 2}`''')
+
+
+    args = parser.parse_args()
+
+    extra_tags = ast.literal_eval(args.extra_tags)
+    assert(isinstance(extra_tags, dict))
+
+    for line in args.istream:
+        record = json.loads(line)
+
+        if 'packet' not in record:
+            continue
+        packet = record['packet']
+
+        if packet['type'] == 'TELEM':
+            print(telem_record_from_telem_packet(packet, extra_tags))
+        elif packet['type'] == 'LOG':
+            print(event_record_from_event_packet(packet, extra_tags))
+            print(log_record_from_event_packet(packet, extra_tags))
