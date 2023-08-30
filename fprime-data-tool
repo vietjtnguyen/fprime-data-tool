@@ -1804,6 +1804,22 @@ if __name__ == '__main__':
             binary blobs; this flag can be specified multiple times to load and
             merge multiple dictionaries''')
     parser.add_argument(
+        '-I', '--import',
+        action='append',
+        default=None,
+        dest='imports',
+        metavar='MODULE',
+        nargs=1,
+        required=False,
+        type=str,
+        help='''
+            imports a Python module with the given name which may augment the
+            types available for parsing; the module should have a top-level
+            variable named `types` that is a dictionary mapping type name
+            (string) to the type itself; these types get added to
+            `fp_types_custom` and can be specified as a top-level type using
+            --record-type''')
+    parser.add_argument(
         '-R', '--record-type',
         type=str,
         default='ComLoggerRecord',
@@ -1871,6 +1887,13 @@ if __name__ == '__main__':
         fsw_dict = FswDictionary(fp_types)
         for (fsw_dict_file_path,) in args.dictionary:
             fsw_dict.parse(fsw_dict_file_path)
+
+    if not args.imports is None:
+        import importlib
+        for (module_name,) in args.imports:
+            module = importlib.import_module(module_name)
+            for type_name, type_class in module.types.items():
+                fp_types_custom[type_name] = type_class
 
     record_type = None
     if not fsw_dict is None:
