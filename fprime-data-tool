@@ -1807,7 +1807,7 @@ if __name__ == '__main__':
             type=ast.literal_eval,
             default=default,
             help=f'''
-                sets the F Prime configuration for {name}; default is 
+                sets the F Prime configuration for {name}; default is
                 {default}''')
 
     def FundamentalType(type_name):
