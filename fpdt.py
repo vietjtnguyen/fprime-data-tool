@@ -401,7 +401,10 @@ class Buffer():
         many bytes are read from the input stream.
         '''
         self = cls()
-        self.data = istream.read(length)
+        if length == 0:
+            self.data = b''
+        else:
+            self.data = istream.read(length)
         return self
 
     def encode(self, ostream):
@@ -443,7 +446,10 @@ class AsciiBuffer():
         the input stream!
         '''
         self = cls()
-        self.string_raw = istream.read(length)
+        if length == 0:
+            self.string_raw = b''
+        else:
+            self.string_raw = istream.read(length)
         self.string = self.string_raw.decode('ascii')
         return self
 
@@ -489,7 +495,10 @@ class String():
     def decode(cls, istream, fsw_dict=None, length=-1):
         self = cls()
         self.length = FwBuffSizeType.decode(istream, fsw_dict)
-        self.string_raw = istream.read(self.length.value)
+        if length == 0:
+            self.string_raw = b''
+        else:
+            self.string_raw = istream.read(self.length.value)
         self.string = self.string_raw.decode('ascii')
         return self
 
