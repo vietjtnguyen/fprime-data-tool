@@ -71,9 +71,9 @@ fprime_configurable_flags = (
     # This controls whether the Time type includes the time context.
     ('FW_USE_TIME_CONTEXT', True),
     # This controls what the byte representation of a true boolean is.
-    ('FW_SERIALIZE_TRUE_VALUE', 0xff.to_bytes()),
+    ('FW_SERIALIZE_TRUE_VALUE', 0xff.to_bytes(1, 'big')),
     # This controls what the byte representation of a false boolean is.
-    ('FW_SERIALIZE_FALSE_VALUE', 0x00.to_bytes()),
+    ('FW_SERIALIZE_FALSE_VALUE', 0x00.to_bytes(1, 'big')),
 )
 for name, value in fprime_configurable_flags:
     # Put these flags in the global namespace for convenience.
