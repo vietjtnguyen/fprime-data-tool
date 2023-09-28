@@ -1815,7 +1815,6 @@ if __name__ == '__main__':
         '-F', '--output-format',
         action='store',
         type=str,
-        choices=('json', 'tsv', 'vnlog'),
         default='vnlog',
         help=f'''
             selects the output format; default is vnlog''')
@@ -1920,8 +1919,10 @@ if __name__ == '__main__':
         import importlib
         for (module_name,) in args.imports:
             module = importlib.import_module(module_name)
-            for type_name, type_class in module.types.items():
-                fp_types_custom[type_name] = type_class
+            globals()[module_name] = module
+            if hasattr(module, 'types'):
+                for type_name, type_class in module.types.items():
+                    fp_types_custom[type_name] = type_class
 
     record_type = None
     if not fsw_dict is None:
@@ -1943,8 +1944,8 @@ if __name__ == '__main__':
             record_type is not FprimeGdsRecord:
         sys.stderr.write(
             f'WARNING: Record type "{record_type.__name__}" is not either '
-            '"ComLoggerRecord" or "FprimeGdsRecord" so forcing use of JSON '
-            'printer\n')
+            '"ComLoggerRecord" or "FprimeGdsRecord". Use JSON for most '
+            'generic printer\n')
         args.output_format = 'json'
 
     if args.output_format == 'json':
@@ -1954,7 +1955,7 @@ if __name__ == '__main__':
     elif args.output_format == 'vnlog':
         printer = VnlogPrinter(fsw_dict)
     else:
-        raise KeyError(f'Unknown printer specified: "{args.output_format}"')
+        printer = eval(args.output_format, globals(), locals())()
 
     printer.print_header()
 
