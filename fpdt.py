@@ -8,7 +8,8 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
+# The above copyright notice and this permission notice shall be included in
+# all
 # copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -43,6 +44,8 @@ def as_json_obj_helper(obj, keys, extended_dict=None):
 # topology by their name.  If a dictionary is loaded the types defined there in
 # will be added to this collection.
 fp_types = {}
+
+
 def register_fp_types(name=None):
     def register_fp_types_decorator(cls):
         fp_types[name or cls.__name__] = cls
@@ -53,6 +56,8 @@ def register_fp_types(name=None):
 # Collection of serializable types defined for processing in this script that
 # are not supposed to participate in processing topology types.
 fp_types_custom = {}
+
+
 def register_fp_types_custom(name=None):
     def register_fp_types_custom_decorator(cls):
         fp_types_custom[name or cls.__name__] = cls
@@ -60,7 +65,7 @@ def register_fp_types_custom(name=None):
     return register_fp_types_custom_decorator
 
 
-#### F Prime configuration flags -----------------------------------------------
+# -- F Prime configuration flags ----------------------------------------------
 
 
 # These are F Prime configuration flags (preprocessor definitions) that affect
@@ -80,7 +85,7 @@ for name, value in fprime_configurable_flags:
     globals()[name] = value
 
 
-#### Fundamental types ---------------------------------------------------------
+# -- Fundamental types --------------------------------------------------------
 
 
 # Creates a class representing the fundamental type given the name and struct
@@ -197,16 +202,16 @@ class Bool():
         data = istream.read(1)
         if len(data) == 0:
             raise BrokenPipeError()
-        if data == FW_SERIALIZE_FALSE_VALUE:
+        if data == FW_SERIALIZE_FALSE_VALUE:  # noqa: F821
             return cls(False)
         else:
             return cls(True)
 
     def encode(self, ostream):
         if self.value:
-            ostream.write(FW_SERIALIZE_TRUE_VALUE)
+            ostream.write(FW_SERIALIZE_TRUE_VALUE)  # noqa: F821
         else:
-            ostream.write(FW_SERIALIZE_FALSE_VALUE)
+            ostream.write(FW_SERIALIZE_FALSE_VALUE)  # noqa: F821
 
     def as_json(self):
         return 'true' if self.value else 'false'
@@ -217,7 +222,7 @@ class Bool():
 
     @classmethod
     def from_string(cls, s):
-        assert(isinstance(s, str))
+        assert isinstance(s, str)
         if s.lower() == 'true':
             return cls(True)
         if s.lower() == 'false':
@@ -241,12 +246,13 @@ class Bool():
     def __str__(self):
         return 'true' if self.value else 'false'
 
+
 # Register it as a type and fundamental type
 fp_types['bool'] = Bool
 fptypes_fundamental['bool'] = Bool
 
 
-#### F Prime configurable types ------------------------------------------------
+# -- F Prime configurable types -----------------------------------------------
 
 
 # Another part of F Prime configuration is defining what fundamental types
@@ -254,16 +260,16 @@ fptypes_fundamental['bool'] = Bool
 # We also use this list to allow users to override using command line
 # arguments.
 fprime_configurable_types = (
-    ('FwBuffSizeType', U16),
-    ('FwChanIdType', U32),
-    ('FwEnumStoreType', I32),
-    ('FwEventIdType', U32),
-    ('FwOpcodeType', U32),
-    ('FwPacketDescriptorType', U32),
-    ('FwPrmIdType', U32),
-    ('FwTimeBaseStoreType', U16),
-    ('FwTimeContextStoreType', U8),
-    ('FwTlmPacketizeIdType', U16),
+    ('FwBuffSizeType', U16),  # noqa: F821
+    ('FwChanIdType', U32),  # noqa: F821
+    ('FwEnumStoreType', I32),  # noqa: F821
+    ('FwEventIdType', U32),  # noqa: F821
+    ('FwOpcodeType', U32),  # noqa: F821
+    ('FwPacketDescriptorType', U32),  # noqa: F821
+    ('FwPrmIdType', U32),  # noqa: F821
+    ('FwTimeBaseStoreType', U16),  # noqa: F821
+    ('FwTimeContextStoreType', U8),  # noqa: F821
+    ('FwTlmPacketizeIdType', U16),  # noqa: F821
 )
 for name, value in fprime_configurable_types:
     # Define these types aliases in fp_types so they can be retrieved by name.
@@ -272,7 +278,7 @@ for name, value in fprime_configurable_types:
     globals()[name] = value
 
 
-#### Basic non-fundamental type factories --------------------------------------
+# -- Basic non-fundamental type factories -------------------------------------
 
 
 # Class decorator factory for extending an enum.IntEnum based class with an
@@ -313,9 +319,9 @@ def make_array_type(name, element_type, size):
 
         def __init__(self, elements):
             self.elements = elements
-            assert(len(self.elements) == type(self).size)
+            assert len(self.elements) == type(self).size
             for element in self.elements:
-                assert(type(element) == type(self).element_type)
+                assert type(element) == type(self).element_type
 
         def as_json(self):
             return '[' + ', '.join(x.as_json() for x in self.elements) + ']'
@@ -330,10 +336,10 @@ def make_array_type(name, element_type, size):
             return self
 
         def encode(self, ostream):
-            assert(type(self.elements) is list)
-            assert(len(self.elements) == type(self).size)
+            assert type(self.elements) is list
+            assert len(self.elements) == type(self).size
             for element in self.elements:
-                assert(type(element) == type(self).element_type)
+                assert type(element) == type(self).element_type
                 element.encode(ostream)
 
         def __getitem__(self, index):
@@ -389,7 +395,7 @@ def make_serializable_type(name, member_defs):
         def encode(self, ostream):
             for member_name, member_type in type(self).member_defs:
                 member_value = getattr(self, member_name)
-                assert(type(member_value) is member_type)
+                assert type(member_value) is member_type
                 member_value.encode(ostream)
 
     Serializable.__name__ = name
@@ -397,7 +403,7 @@ def make_serializable_type(name, member_defs):
     return Serializable
 
 
-#### Basic non-fundamental types -----------------------------------------------
+# -- Basic non-fundamental types ----------------------------------------------
 
 
 @register_fp_types_custom()
@@ -427,7 +433,7 @@ class Buffer():
         return self
 
     def encode(self, ostream):
-        assert(type(self.data) is bytes)
+        assert type(self.data) is bytes
         ostream.write(self.data)
 
     def __bytes__(self):
@@ -476,7 +482,7 @@ class AsciiBuffer():
         '''
         Writes the buffer to the output stream WITHOUT any length information.
         '''
-        assert(type(self.string) is string)
+        assert type(self.string) is str
         ostream.write(self.string.encode('ascii'))
 
     def __bytes__(self):
@@ -513,7 +519,7 @@ class String():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=-1):
         self = cls()
-        self.length = FwBuffSizeType.decode(istream, fsw_dict)
+        self.length = FwBuffSizeType.decode(istream, fsw_dict)  # noqa: F821
         if length == 0:
             self.string_raw = b''
         else:
@@ -522,8 +528,8 @@ class String():
         return self
 
     def encode(self, ostream):
-        assert(type(self.length) is FwBuffSizeType)
-        assert(type(self.string) is string)
+        assert type(self.length) is FwBuffSizeType  # noqa: F821
+        assert type(self.string) is str
         self.length.encode(ostream)
         ostream.write(self.string.encode('ascii'))
 
@@ -555,7 +561,7 @@ class Time():
         utc_datetime = datetime.datetime.utcfromtimestamp(unix_seconds)
         local_tzinfo = datetime.datetime.now().astimezone().tzinfo
         local_datetime = \
-            datetime.datetime.fromtimestamp(unix_seconds, local_tzinfo )
+            datetime.datetime.fromtimestamp(unix_seconds, local_tzinfo)
         extended_dict = {
             'value': f'{unix_seconds}',
             'utc_year': f'{json.dumps(utc_datetime.year)}',
@@ -583,33 +589,35 @@ class Time():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        if FW_USE_TIME_BASE:
-            self.base = FwTimeBaseStoreType.decode(istream, fsw_dict)
-        if FW_USE_TIME_CONTEXT:
-            self.context = FwTimeContextStoreType.decode(istream, fsw_dict)
-        self.seconds = U32.decode(istream, fsw_dict)
-        self.microseconds = U32.decode(istream, fsw_dict)
+        if FW_USE_TIME_BASE:  # noqa: F821
+            self.base = \
+                FwTimeBaseStoreType.decode(istream, fsw_dict)  # noqa: F821
+        if FW_USE_TIME_CONTEXT:  # noqa: F821
+            self.context = \
+                FwTimeContextStoreType.decode(istream, fsw_dict)  # noqa: F821
+        self.seconds = U32.decode(istream, fsw_dict)  # noqa: F821
+        self.microseconds = U32.decode(istream, fsw_dict)  # noqa: F821
         return self
 
     def encode(self, ostream):
-        if FW_USE_TIME_BASE:
-            assert(type(self.base) is FwTimeBaseStoreType)
-        if FW_USE_TIME_CONTEXT:
-            assert(type(self.context) is FwTimeContextStoreType)
-        assert(type(self.seconds) is U32)
-        assert(type(self.microseconds) is U32)
-        if FW_USE_TIME_BASE:
+        if FW_USE_TIME_BASE:  # noqa: F821
+            assert type(self.base) is FwTimeBaseStoreType  # noqa: F821
+        if FW_USE_TIME_CONTEXT:  # noqa: F821
+            assert type(self.context) is FwTimeContextStoreType  # noqa: F821
+        assert type(self.seconds) is U32  # noqa: F821
+        assert type(self.microseconds) is U32  # noqa: F821
+        if FW_USE_TIME_BASE:  # noqa: F821
             self.base.encode(ostream)
-        if FW_USE_TIME_CONTEXT:
+        if FW_USE_TIME_CONTEXT:  # noqa: F821
             self.context.encode(ostream)
-        self.seconds = U32.decode(ostream, fsw_dict)
-        self.microseconds = U32.decode(ostream, fsw_dict)
+        self.seconds = U32.decode(ostream, fsw_dict)  # noqa: F821
+        self.microseconds = U32.decode(ostream, fsw_dict)  # noqa: F821
 
     def __str__(self):
         return str(float(self.seconds) + float(self.microseconds) * 1e-6)
 
 
-#### Record types --------------------------------------------------------------
+# -- Record types -------------------------------------------------------------
 
 
 def read_until_sync_word(istream, sync_word):
@@ -668,7 +676,7 @@ def create_record_class(name, packet_size_type):
             return self
 
         def encode(self, ostream):
-            assert(type(self.packet_size) is packet_size_type)
+            assert type(self.packet_size) is packet_size_type
             # TODO (vnguyen): Be smart about automatically calculating this.
             self.packet_size.encode(ostream)
             self.packet.encode(ostream)
@@ -677,10 +685,11 @@ def create_record_class(name, packet_size_type):
     return Record
 
 
-ComLoggerRecord = create_record_class("ComLoggerRecord", U16)
-FprimeGdsRecord = create_record_class("FprimeGdsRecord", U32)
+ComLoggerRecord = create_record_class("ComLoggerRecord", U16)  # noqa: F821
+FprimeGdsRecord = create_record_class("FprimeGdsRecord", U32)  # noqa: F821
 
-@register_fp_types_custom()
+
+@register_fp_types_custom
 class FprimeGdsStream():
 
     sync_word = bytes.fromhex('deadbeef')
@@ -691,7 +700,7 @@ class FprimeGdsStream():
     def as_json(self):
         if self.record is None:
             return '{}'
-        assert(isinstance(self.record, FprimeGdsRecord))
+        assert isinstance(self.record, FprimeGdsRecord)
         return self.record.as_json()
 
     @classmethod
@@ -704,7 +713,7 @@ class FprimeGdsStream():
     def encode(self, ostream):
         if self.record is None:
             return
-        assert(isinstance(self.record, FprimeGdsRecord))
+        assert isinstance(self.record, FprimeGdsRecord)
         ostream.write(type(self).sync_word)
         self.record.encode(ostream)
 
@@ -720,7 +729,7 @@ class PrmDbRecord():
             "offset": json.dumps(self.offset)
         }
 
-        if not self.parameter is None:
+        if self.parameter is not None:
             extended_dict['topology_name'] = \
                 f'{json.dumps(self.parameter.topology_name)}'
             extended_dict['component'] = \
@@ -729,7 +738,7 @@ class PrmDbRecord():
                 f'{json.dumps(self.parameter.type_str)}'
             extended_dict['name'] = f'{json.dumps(self.parameter.name)}'
 
-        if not self.value is None:
+        if self.value is not None:
             extended_dict['value'] = self.value.as_json()
 
         return as_json_obj_helper(
@@ -742,9 +751,10 @@ class PrmDbRecord():
         self = cls()
         self.offset = istream.tell() if istream.seekable() else None
         read_until_sync_word(istream, cls.sync_word)
-        self.size = U32.decode(istream, fsw_dict)
-        self.id = FwPrmIdType.decode(istream, fsw_dict)
-        self.value_raw = Buffer.decode(istream, fsw_dict, self.size.value - 4)
+        self.size = U32.decode(istream, fsw_dict)  # noqa: F821
+        self.id = FwPrmIdType.decode(istream, fsw_dict)  # noqa: F821
+        self.value_raw = \
+            Buffer.decode(istream, fsw_dict, self.size.value - 4)  # noqa: F821
 
         self.parameter = None
         self.value = None
@@ -757,24 +767,25 @@ class PrmDbRecord():
                     'in FSW dictionary. This indicates that the '
                     'dictionary and the input data are not compatible.\n')
 
-        if not self.parameter is None and not self.parameter.type is None:
+        if self.parameter is not None and self.parameter.type is not None:
             value_raw_istream = io.BytesIO(self.value_raw.data)
-            self.value = self.parameter.type.decode(value_raw_istream, fsw_dict)
+            self.value = \
+                self.parameter.type.decode(value_raw_istream, fsw_dict)
 
         return self
 
     def encode(self, ostream):
-        assert(type(self.type) is type(self).Type)
+        assert type(self.type) is type(self).Type
         self.type.encode(ostream)
 
 
-#### F Prime packet types ------------------------------------------------------
+# -- F Prime packet types -----------------------------------------------------
 
 
 @register_fp_types_custom()
 class Packet():
 
-    @enum_represented_as(FwPacketDescriptorType)
+    @enum_represented_as(FwPacketDescriptorType)  # noqa: F821
     @register_fp_types_custom('Packet.Type')
     class Type(enum.IntEnum):
         COMMAND = 0
@@ -827,17 +838,17 @@ class Packet():
         return self
 
     def encode(self, ostream):
-        assert(type(self.type) is type(self).Type)
+        assert type(self.type) is type(self).Type
         if self.type == type(self).Type.COMMAND:
-            assert(isinstance(self.payload, CommandPacket))
+            assert isinstance(self.payload, CommandPacket)
         elif self.type == type(self).Type.TELEM:
-            assert(isinstance(self.payload, TelemPacket))
+            assert isinstance(self.payload, TelemPacket)
         elif self.type == type(self).Type.LOG:
-            assert(isinstance(self.payload, EventPacket))
+            assert isinstance(self.payload, EventPacket)
         elif self.type == type(self).Type.FILE:
-            assert(isinstance(self.payload, FilePacket))
+            assert isinstance(self.payload, FilePacket)
         else:
-            assert(isinstance(self.payload, Buffer))
+            assert isinstance(self.payload, Buffer)
         self.type.encode(ostream)
         self.payload.encode(ostream)
 
@@ -850,13 +861,14 @@ class CommandPacket():
             'opcode_hex': f'{json.dumps(hex(self.opcode.value))}'
         }
 
-        if not self.command is None:
+        if self.command is not None:
             extended_dict['topology_name'] = \
                 f'{json.dumps(self.command.topology_name)}'
-            extended_dict['component'] = f'{json.dumps(self.command.component)}'
+            extended_dict['component'] = \
+                f'{json.dumps(self.command.component)}'
             extended_dict['mnemonic'] = f'{json.dumps(self.command.mnemonic)}'
 
-        if not self.arguments is None:
+        if self.arguments is not None:
             args_as_json = []
 
             for arg_def, arg in zip(self.command.args, self.arguments):
@@ -880,7 +892,7 @@ class CommandPacket():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.opcode = FwOpcodeType.decode(istream, fsw_dict)
+        self.opcode = FwOpcodeType.decode(istream, fsw_dict)  # noqa: F821
         # NOTE: This is "read the rest" behavior so it is important that the
         # input stream be confined to the extents of the packet itself.
         self.arguments_raw = Buffer.decode(istream, fsw_dict)
@@ -900,7 +912,7 @@ class CommandPacket():
                     'that the dictionary and the input data are not '
                     'compatible.\n')
 
-        if not self.command is None:
+        if self.command is not None:
             arguments_raw_istream = io.BytesIO(self.arguments_raw.data)
             self.arguments = []
             for arg in self.command.args:
@@ -916,8 +928,8 @@ class CommandPacket():
         return self
 
     def encode(self, ostream):
-        assert(type(self.opcode) == FwOpcodeType)
-        assert(type(self.arguments_raw) == Buffer)
+        assert type(self.opcode) == FwOpcodeType  # noqa: F821
+        assert type(self.arguments_raw) == Buffer
         self.opcode.encode(ostream)
         self.arguments_raw.encode(ostream)
 
@@ -930,14 +942,15 @@ class TelemPacket():
             'id_hex': f'{json.dumps(hex(self.id.value))}'
         }
 
-        if not self.channel is None:
+        if self.channel is not None:
             extended_dict['topology_name'] = \
                 f'{json.dumps(self.channel.topology_name)}'
-            extended_dict['component'] = f'{json.dumps(self.channel.component)}'
+            extended_dict['component'] = \
+                f'{json.dumps(self.channel.component)}'
             extended_dict['name'] = f'{json.dumps(self.channel.name)}'
             extended_dict['type'] = f'{json.dumps(self.channel.type_str)}'
 
-        if not self.value is None:
+        if self.value is not None:
             extended_dict['value'] = self.value.as_json()
 
         return as_json_obj_helper(
@@ -948,7 +961,7 @@ class TelemPacket():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.id = FwChanIdType.decode(istream, fsw_dict)
+        self.id = FwChanIdType.decode(istream, fsw_dict)  # noqa: F821
         self.time = Time.decode(istream, fsw_dict)
         # NOTE: This is "read the rest" behavior so it is important that the
         # input stream be confined to the extents of the packet itself.
@@ -965,16 +978,16 @@ class TelemPacket():
                     'in FSW dictionary. This indicates that the '
                     'dictionary and the input data are not compatible.\n')
 
-        if not self.channel is None and not self.channel.type is None:
+        if self.channel is not None and self.channel.type is not None:
             value_raw_istream = io.BytesIO(self.value_raw.data)
             self.value = self.channel.type.decode(value_raw_istream, fsw_dict)
 
         return self
 
     def encode(self, ostream):
-        assert(type(self.id) == FwChanIdType)
-        assert(type(self.time) == Time)
-        assert(type(self.value_raw) == Buffer)
+        assert type(self.id) == FwChanIdType  # noqa: F821
+        assert type(self.time) == Time
+        assert type(self.value_raw) == Buffer
         self.id.encode(ostream)
         self.time.encode(ostream)
         self.value_raw.encode(ostream)
@@ -988,7 +1001,7 @@ class EventPacket():
             'id_hex': f'{json.dumps(hex(self.id.value))}'
         }
 
-        if not self.event is None:
+        if self.event is not None:
             extended_dict['topology_name'] = \
                 f'{json.dumps(self.event.topology_name)}'
             extended_dict['component'] = f'{json.dumps(self.event.component)}'
@@ -997,19 +1010,20 @@ class EventPacket():
                     json.dumps(
                         self.event.format_string
                         % tuple(arg.value for arg in self.arguments))
-            except:
+            except:  # noqa: E722
                 try:
                     extended_dict['message'] = \
                         json.dumps(
-                            self.event.format_string.format(*
-                                tuple(arg.value for arg in self.arguments)))
-                except:
+                            self.event.format_string.format(
+                                *tuple(arg.value for arg in self.arguments)))
+                except:  # noqa: E722
                     extended_dict['message'] = \
                         json.dumps(self.event.format_string)
             extended_dict['name'] = f'{json.dumps(self.event.name)}'
-            extended_dict['severity'] = f'{json.dumps(self.event.severity_str)}'
+            extended_dict['severity'] = \
+                f'{json.dumps(self.event.severity_str)}'
 
-        if not self.arguments is None:
+        if self.arguments is not None:
             args_as_json = []
 
             for arg_def, arg in zip(self.event.args, self.arguments):
@@ -1027,8 +1041,8 @@ class EventPacket():
                 # argument.
                 if self.event.component == 'cmdDisp' \
                         and arg_def.name == 'Opcode':
-                    command_topology_name = \
-                        self.fsw_dict.commands_by_opcode[arg.value].topology_name
+                    command_def = self.fsw_dict.commands_by_opcode[arg.value]
+                    command_topology_name = command_def.topology_name
                     arg_as_json += \
                         f', "value_hex": {json.dumps(hex(arg.value))}'
                     arg_as_json += \
@@ -1048,7 +1062,7 @@ class EventPacket():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.id = FwEventIdType.decode(istream, fsw_dict)
+        self.id = FwEventIdType.decode(istream, fsw_dict)  # noqa: F821
         self.time = Time.decode(istream, fsw_dict)
         # NOTE: This is "read the rest" behavior so it is important that the
         # input stream be confined to the extents of the packet itself.
@@ -1068,7 +1082,7 @@ class EventPacket():
                     'in FSW dictionary. This indicates that the '
                     'dictionary and the input data are not compatible.\n')
 
-        if not self.event is None:
+        if self.event is not None:
             arguments_raw_istream = io.BytesIO(self.arguments_raw.data)
             self.arguments = []
             for arg in self.event.args:
@@ -1084,9 +1098,9 @@ class EventPacket():
         return self
 
     def encode(self, ostream):
-        assert(type(self.id) == FwEventIdType)
-        assert(type(self.time) == Time)
-        assert(type(self.arguments_raw) == Buffer)
+        assert type(self.id) == FwEventIdType  # noqa: F821
+        assert type(self.time) == Time
+        assert type(self.arguments_raw) == Buffer
         self.id.encode(ostream)
         self.time.encode(ostream)
         self.arguments_raw.encode(ostream)
@@ -1101,14 +1115,14 @@ class FilePacketPathName():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.length = U8.decode(istream, fsw_dict)
+        self.length = U8.decode(istream, fsw_dict)  # noqa: F821
         self.value = AsciiBuffer.decode(istream, fsw_dict, self.length.value)
         return self
 
     def encode(self, ostream):
-        assert(type(self.length) == U8)
-        assert(type(self.value) == AsciiBuffer)
-        assert(len(self.value) == self.length)
+        assert type(self.length) == U8  # noqa: F821
+        assert type(self.value) == AsciiBuffer
+        assert len(self.value) == self.length
         self.length.encode(ostream)
         self.value.encode(ostream)
 
@@ -1119,7 +1133,7 @@ class FilePacketPathName():
 @register_fp_types_custom()
 class FilePacket():
 
-    @enum_represented_as(U8)
+    @enum_represented_as(U8)  # noqa: F821
     @register_fp_types_custom('FilePacket.Type')
     class Type(enum.IntEnum):
         START = 0
@@ -1135,7 +1149,7 @@ class FilePacket():
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
         self.type = type(self).Type.decode(istream, fsw_dict)
-        self.sequence_index = U32.decode(istream, fsw_dict)
+        self.sequence_index = U32.decode(istream, fsw_dict)  # noqa: F821
 
         if self.type == type(self).Type.START:
             self.payload = FilePacketStartPayload.decode(istream, fsw_dict)
@@ -1151,17 +1165,16 @@ class FilePacket():
         return self
 
     def encode(self, ostream):
-        assert(type(self.type) is type(self).Type)
-        assert(type(self.sequence_index) is U32)
-        assert(len(self.value) == self.length)
+        assert type(self.type) is type(self).Type
+        assert type(self.sequence_index) is U32  # noqa: F821
         if self.type == type(self).Type.START:
-            assert(type(self.payload) is FilePacketStartPayload)
+            assert type(self.payload) is FilePacketStartPayload
         elif self.type == type(self).Type.DATA:
-            assert(type(self.payload) is FilePacketDataPayload)
+            assert type(self.payload) is FilePacketDataPayload
         elif self.type == type(self).Type.END:
-            assert(type(self.payload) is FilePacketEndPayload)
+            assert type(self.payload) is FilePacketEndPayload
         elif self.type == type(self).Type.CANCEL:
-            assert(type(self.payload) is FilePacketCancelPayload)
+            assert type(self.payload) is FilePacketCancelPayload
         else:
             raise KeyError(f'Encountered unknown FilePacket type: {self.type}')
         self.type.encode(ostream)
@@ -1180,7 +1193,7 @@ class FilePacketStartPayload():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.file_size = U32.decode(istream, fsw_dict)
+        self.file_size = U32.decode(istream, fsw_dict)  # noqa: F821
         self.source_path = FilePacketPathName.decode(istream, fsw_dict)
         self.destination_path = FilePacketPathName.decode(istream, fsw_dict)
         return self
@@ -1203,15 +1216,15 @@ class FilePacketDataPayload():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.byte_offset = U32.decode(istream, fsw_dict)
-        self.data_size = U16.decode(istream, fsw_dict)
+        self.byte_offset = U32.decode(istream, fsw_dict)  # noqa: F821
+        self.data_size = U16.decode(istream, fsw_dict)  # noqa: F821
         self.data = Buffer.decode(istream, fsw_dict, self.data_size.value)
         return self
 
     def encode(self, ostream):
-        assert(type(self.byte_offset) is U32)
-        assert(type(self.data_size) is U16)
-        assert(type(self.data) is Buffer)
+        assert type(self.byte_offset) is U32  # noqa: F821
+        assert type(self.data_size) is U16  # noqa: F821
+        assert type(self.data) is Buffer
         self.byte_offset.encode(ostream)
         self.data_size.encode(ostream)
         self.data.encode(ostream)
@@ -1226,11 +1239,11 @@ class FilePacketEndPayload():
     @classmethod
     def decode(cls, istream, fsw_dict=None, length=None):
         self = cls()
-        self.checksum = U32.decode(istream, fsw_dict)
+        self.checksum = U32.decode(istream, fsw_dict)  # noqa: F821
         return self
 
     def encode(self, ostream):
-        assert(type(self.checksum) is U32)
+        assert type(self.checksum) is U32  # noqa: F821
         self.checksum.encode(ostream)
 
 
@@ -1249,7 +1262,7 @@ class FilePacketCancelPayload():
         pass
 
 
-#### Dictionary ----------------------------------------------------------------
+# -- Dictionary ---------------------------------------------------------------
 
 
 class FswDictionary():
@@ -1301,7 +1314,7 @@ class FswDictionary():
             self.element_type_str = elem.get('type')
             self.element_type = None
             self.type_id_str = elem.get('type_id')
-            if not self.type_id_str is None:
+            if self.type_id_str is not None:
                 self.type_id = int(
                     self.type_id_str,
                     base=16 if self.type_id_str.startswith('0x') else 10)
@@ -1450,8 +1463,8 @@ class FswDictionary():
                 for elem in collection:
                     if elem.tag == 'command':
                         command = type(self).Command(elem)
-                        self.commands[(command.component, command.mnemonic)] = \
-                            command
+                        command_key = (command.component, command.mnemonic)
+                        self.commands[command_key] = command
                         self.commands_by_opcode[command.opcode] = command
             elif collection.tag == 'events':
                 for elem in collection:
@@ -1491,23 +1504,24 @@ class FswDictionary():
 
     def construct_types(self, fsw_dict_file_path):
         for enum_def in self.enums.values():
-            if not enum_def.type is None:
+            if enum_def.type is not None:
                 continue
 
-            enum_def.type = enum_represented_as(FwEnumStoreType)(
+            enum_def.type = enum_represented_as(FwEnumStoreType)(  # noqa: F821
                 enum.IntEnum(
                     enum_def.name,
                     [(item.name, item.value) for item in enum_def.items]))
 
-            self.register_type(fsw_dict_file_path, enum_def.name, enum_def.type)
+            self.register_type(
+                fsw_dict_file_path, enum_def.name, enum_def.type)
 
         for serializable_def in self.serializables.values():
-            if not serializable_def.type is None:
+            if serializable_def.type is not None:
                 continue
 
             # Look up types for each member of the serializable
             for member in serializable_def.members:
-                if not member.type_str in self.types:
+                if member.type_str not in self.types:
                     sys.stderr.write(
                         'WARNING: Could not find type '
                         f'"{member.type_str}" for serializable '
@@ -1535,10 +1549,10 @@ class FswDictionary():
                 serializable_def.type)
 
         for array_def in self.arrays.values():
-            if not array_def.type is None:
+            if array_def.type is not None:
                 continue
 
-            if not array_def.element_type_str in self.types:
+            if array_def.element_type_str not in self.types:
                 sys.stderr.write(
                     'WARNING: Could not find type '
                     f'"{array_def.element_type_str}" for '
@@ -1558,7 +1572,7 @@ class FswDictionary():
     def resolve_types(self):
         for command in self.commands.values():
             for i, arg in enumerate(command.args):
-                if not arg.type_str in self.types:
+                if arg.type_str not in self.types:
                     sys.stderr.write(
                         f'WARNING: Could not find type "{arg.type_str}" for '
                         f'argument "{arg.name}" of command '
@@ -1568,7 +1582,7 @@ class FswDictionary():
 
         for event in self.events.values():
             for i, arg in enumerate(event.args):
-                if not arg.type_str in self.types:
+                if arg.type_str not in self.types:
                     sys.stderr.write(
                         f'WARNING: Could not find type "{arg.type_str}" for '
                         f'argument "{arg.name}" of event '
@@ -1577,7 +1591,7 @@ class FswDictionary():
                 arg.type = self.types[arg.type_str]
 
         for channel in self.channels.values():
-            if not channel.type_str in self.types:
+            if channel.type_str not in self.types:
                 sys.stderr.write(
                     f'WARNING: Could not find type "{channel.type_str}" for '
                     f'channel "{channel.topology_name}" in types namespace\n')
@@ -1603,7 +1617,7 @@ class FswDictionary():
             parameter.type = set_command.args[0].type
 
 
-#### Printers ------------------------------------------------------------------
+# -- Printers -----------------------------------------------------------------
 
 
 class JsonPrinter():
@@ -1619,6 +1633,7 @@ class JsonPrinter():
 
     def print_footer(self):
         pass
+
 
 class TsvPrinter():
 
@@ -1668,6 +1683,8 @@ class TsvPrinter():
                 self._d
                 and self._d.channels_by_id.get(payload.id.value, None)
             )
+            payload_value_as_hex = \
+                payload.value_raw.data.hex() if len(payload.value_raw) else ""
             sys.stdout.write(
                 f'\t{payload.time}'
                 f'\t{payload.id}'
@@ -1677,11 +1694,15 @@ class TsvPrinter():
                 f'\t{getattr(channel, "name", "")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.value_raw)}'
-                f'\t{payload.value_raw.data.hex() if len(payload.value_raw) else ""}'
+                f'\t{payload_value_as_hex}'
                 f'\t{payload.value}'
                 '\t\t\t\t\t\t\t\t\t\t')
         elif record.packet.type == Packet.Type.LOG:
-            event = self._d and self._d.events_by_id.get(payload.id.value, None)
+            event = \
+                self._d and self._d.events_by_id.get(payload.id.value, None)
+            payload_args_as_hex = \
+                payload.arguments_raw.data.hex() \
+                if len(payload.arguments_raw) else ""
             sys.stdout.write(
                 f'\t{payload.time}'
                 '\t\t\t\t\t\t\t\t\t'
@@ -1693,7 +1714,7 @@ class TsvPrinter():
                 f'\t{getattr(event, "severity_str", "")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.arguments_raw)}'
-                f'\t{payload.arguments_raw.data.hex() if len(payload.arguments_raw) else ""}'
+                f'\t{payload_args_as_hex}'
                 '\t')
         else:
             sys.stdout.write(
@@ -1753,6 +1774,8 @@ class VnlogPrinter():
                 self._d
                 and self._d.channels_by_id.get(payload.id.value, None)
             )
+            payload_value_as_hex = \
+                payload.value_raw.data.hex() if len(payload.value_raw) else "-"
             sys.stdout.write(
                 f'\t{payload.time}'
                 f'\t{payload.id}'
@@ -1762,11 +1785,15 @@ class VnlogPrinter():
                 f'\t{getattr(channel, "name", "-")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.value_raw)}'
-                f'\t{payload.value_raw.data.hex() if len(payload.value_raw) else "-"}'
+                f'\t{payload_value_as_hex}'
                 f'\t{payload.value}'
                 '\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-')
         elif record.packet.type == Packet.Type.LOG:
-            event = self._d and self._d.events_by_id.get(payload.id.value, None)
+            event = \
+                self._d and self._d.events_by_id.get(payload.id.value, None)
+            payload_args_as_hex = \
+                payload.arguments_raw.data.hex() \
+                if len(payload.arguments_raw) else "-"
             sys.stdout.write(
                 f'\t{payload.time}'
                 '\t-\t-\t-\t-\t-\t-\t-\t-\t-'
@@ -1778,7 +1805,7 @@ class VnlogPrinter():
                 f'\t{getattr(event, "severity_str", "-")}'
                 f'\t{payload.time}'
                 f'\t{len(payload.arguments_raw)}'
-                f'\t{payload.arguments_raw.data.hex() if len(payload.arguments_raw) else "-"}'
+                f'\t{payload_args_as_hex}'
                 '\t-')
         else:
             sys.stdout.write(
@@ -1790,7 +1817,7 @@ class VnlogPrinter():
         pass
 
 
-#### Main program --------------------------------------------------------------
+# -- Main program -------------------------------------------------------------
 
 
 if __name__ == '__main__':
@@ -1817,7 +1844,7 @@ if __name__ == '__main__':
         type=str,
         choices=('json', 'tsv', 'vnlog'),
         default='vnlog',
-        help=f'''
+        help='''
             selects the output format; default is vnlog''')
     parser.add_argument(
         '-d', '--dictionary',
@@ -1911,12 +1938,12 @@ if __name__ == '__main__':
         globals()[name] = getattr(args, name)
 
     fsw_dict = None
-    if not args.dictionary is None:
+    if args.dictionary is not None:
         fsw_dict = FswDictionary(fp_types)
         for (fsw_dict_file_path,) in args.dictionary:
             fsw_dict.parse(fsw_dict_file_path)
 
-    if not args.imports is None:
+    if args.imports is not None:
         import importlib
         for (module_name,) in args.imports:
             module = importlib.import_module(module_name)
@@ -1924,7 +1951,7 @@ if __name__ == '__main__':
                 fp_types_custom[type_name] = type_class
 
     record_type = None
-    if not fsw_dict is None:
+    if fsw_dict is not None:
         record_type = fsw_dict.types.get(args.record_type, record_type)
     record_type = fp_types_custom.get(args.record_type, record_type)
 
